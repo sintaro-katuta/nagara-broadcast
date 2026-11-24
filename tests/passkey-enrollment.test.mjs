@@ -4,6 +4,7 @@ import {readFileSync} from 'node:fs';
 import {makeEnrollment} from '../cloudflare/passkey-enrollment.mjs';
 import {decryptEmail} from '../cloudflare/recovery-crypto.mjs';
 import {createHash,generateKeyPairSync} from 'node:crypto';
+import {verifySession} from '../cloudflare/sessions.mjs';
 const sqlite=await import('node:sqlite').catch(()=>null);
 
 test('email confirmation and credential verification are required before creating an account',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{
@@ -65,5 +66,21 @@ test('a failed credential cannot create an account and consumes the enrollment',
  assert.equal(await enrollment.finish(db,browser,'https://radio.example',{},1003),null);
  assert.equal(await enrollment.finish(db,browser,'https://radio.example',{},1004),null);
  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM accounts').get().n,0);
+ sql.close();
+});
+
+test('a delayed enrollment response does not recreate a session revoked by recovery',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{
+ const sql=new sqlite.DatabaseSync(':memory:');sql.exec('PRAGMA foreign_keys=ON');
+ for(const f of ['../cloudflare/schema.sql','../cloudflare/migrations/0001_account_data.sql','../cloudflare/migrations/0002_identity_sessions.sql','../cloudflare/migrations/0003_passkeys.sql','../cloudflare/migrations/0004_recovery_email.sql','../cloudflare/migrations/0009_passkey_enrollments.sql','../cloudflare/migrations/0011_enrollment_challenge_expiry.sql'])sql.exec(readFileSync(new URL(f,import.meta.url),'utf8'));
+ let release,entered;const ready=new Promise(resolve=>entered=resolve),gate=new Promise(resolve=>release=resolve);
+ const db={prepare(q){return {bind(...args){return {async run(){return sql.prepare(q).run(...args)},async first(){return sql.prepare(q).get(...args)||null}}}}},async batch(items){sql.exec('BEGIN');try{for(const item of items)await item.run();sql.exec('COMMIT')}catch(e){sql.exec('ROLLBACK');throw e}entered();await gate}};
+ const key=crypto.getRandomValues(new Uint8Array(32));
+ const enrollment=makeEnrollment({options:async()=>({challenge:'c'.repeat(43)}),verify:async()=>({verified:true,registrationInfo:{credential:{id:'key',publicKey:new Uint8Array([1]),counter:0}}})});
+ const token=await enrollment.begin(db,'race@example.com',key,key,1000),browser=await enrollment.confirm(db,token,1001);
+ await enrollment.options(db,browser,'https://radio.example',1002);
+ const pending=enrollment.finish(db,browser,'https://radio.example',{},1003);await ready;
+ sql.exec('DELETE FROM account_sessions');release();const session=await pending;
+ const request=new Request('https://radio.example/api/account',{headers:{Cookie:session.split(';')[0]}});
+ assert.equal(await verifySession(request,db,1004000),null);
  sql.close();
 });

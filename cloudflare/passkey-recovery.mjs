@@ -61,6 +61,7 @@ export function makeRecovery({options=registrationOptions,verify=verifyRegistrat
    try{
     changes=await db.batch([
      db.prepare('INSERT INTO passkeys(credential_id,account_id,public_key,sign_count,transports,created_at) VALUES (CASE WHEN NOT EXISTS (SELECT 1 FROM account_admins WHERE account_id=?) AND (SELECT COUNT(*) FROM passkeys WHERE account_id=?)<20 AND EXISTS (SELECT 1 FROM passkey_recovery_attempts WHERE browser_token_hash=? AND account_id=? AND challenge IS NULL AND expires_at>?) THEN ? ELSE NULL END,?,?,?,?,?) RETURNING credential_id').bind(row.account_id,row.account_id,browserHash,row.account_id,now,credential.id,row.account_id,credential.publicKey,credential.counter,JSON.stringify(credential.transports||[]),new Date(now*1000).toISOString()),
+     db.prepare('INSERT INTO account_auth_generations(account_id,generation) VALUES (?,1) ON CONFLICT(account_id) DO UPDATE SET generation=generation+1').bind(row.account_id),
      db.prepare('DELETE FROM account_sessions WHERE account_id=?').bind(row.account_id),
      db.prepare('DELETE FROM recovery_tokens WHERE account_id=? AND purpose=?').bind(row.account_id,'recover_account'),
      db.prepare('DELETE FROM passkey_recovery_attempts WHERE account_id=?').bind(row.account_id),
