@@ -5,6 +5,28 @@
 </head>
 <body>
 <a class="skip-link action-primary" href="#main">コンテンツへ移動</a>
+<dialog id="account-dialog" class="account-dialog" aria-labelledby="account-dialog-title">
+ <div class="account-dialog-inner">
+  <button id="account-close" type="button" class="account-close" aria-label="閉じる">×</button>
+  <img src="/design-assets/nagara-icon-orange.png" alt="" class="account-mark">
+  <h2 id="account-dialog-title">ながら放送へようこそ</h2>
+  <p id="account-message" class="account-message" aria-live="polite">ログインすると、あとで聴くと再生履歴を別の端末でも使えます。</p>
+  <div id="account-anonymous">
+   <button id="account-signin" type="button" class="action-primary account-primary">パスキーでログイン</button>
+   <button id="account-register-toggle" type="button" class="account-link">はじめての方は登録</button>
+   <button id="account-recover-toggle" type="button" class="account-link">パスキーを使えない方</button>
+   <form id="account-email-form" hidden>
+    <label for="account-email">メールアドレス</label>
+    <input id="account-email" type="email" autocomplete="email" required maxlength="254" placeholder="you@example.com">
+    <p id="account-email-description">確認メールをお送りします。メールアドレスは、パスキーを使えなくなったときの復旧にも使います。</p>
+    <button id="account-email-submit" type="submit" class="action-primary account-primary">確認メールを送る</button>
+   </form>
+  </div>
+  <div id="account-confirm" hidden><button id="account-confirm-button" type="button" class="action-primary account-primary">メールアドレスを確認</button></div>
+  <div id="account-create" hidden><button id="account-create-button" type="button" class="action-primary account-primary">パスキーを登録</button></div>
+  <div id="account-signed-in" hidden><button id="account-logout" type="button" class="account-link">ログアウト</button></div>
+ </div>
+</dialog>
 <header class="site-header bg-neutral-primary border-b border-default">
  <div class="header-inner">
   <a class="wordmark" href="/" aria-label="ながら放送 ホーム"><img class="brand-icon" src="/design-assets/nagara-icon-orange.png" alt=""><span>ながら放送</span></a>

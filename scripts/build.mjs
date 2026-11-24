@@ -5,4 +5,6 @@ import path from 'node:path';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 execFileSync(process.execPath,[path.join(root,'node_modules/@tailwindcss/cli/dist/index.mjs'),'-i','src/styles.css','-o','public/styles.css','--minify'],{cwd:root,stdio:'inherit'});
 await copyFile(path.join(root,'node_modules/flowbite/dist/flowbite.min.js'),path.join(root,'public/flowbite.js'));
+await copyFile(path.join(root,'node_modules/@simplewebauthn/browser/dist/bundle/index.umd.min.js'),path.join(root,'public/webauthn.js'));
+await copyFile(path.join(root,'node_modules/@simplewebauthn/browser/LICENSE.md'),path.join(root,'public/webauthn.LICENSE.txt'));
 console.log('Flowbite CSS and local runtime are ready.');

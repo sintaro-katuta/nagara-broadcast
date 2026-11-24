@@ -23,6 +23,10 @@ export default {
  async fetch(request,env){
   const url=new URL(request.url);
   try{
+   if(request.method==='GET'&&url.pathname==='/api/auth/status'){
+    const configured=env.AUTH_ENABLED==='true'&&env.PASSKEY_API_ENABLED==='true'&&env.AUTH_ORIGIN===url.origin&&!!env.EMAIL&&typeof env.AUTH_EMAIL_FROM==='string'&&['AUTH_RATE_KEY','AUTH_LOOKUP_KEY','AUTH_ENCRYPTION_KEY'].every(k=>typeof env[k]==='string'&&/^[a-f0-9]{64}$/i.test(env[k]))&&new Set(['AUTH_RATE_KEY','AUTH_LOOKUP_KEY','AUTH_ENCRYPTION_KEY'].map(k=>env[k].toLowerCase())).size===3;
+    return json({available:configured});
+   }
    if(env.AUTH_ENABLED==='true'){
     if(env.PASSKEY_API_ENABLED==='true'){
      const response=await authRoutes(request,env);if(response)return response;

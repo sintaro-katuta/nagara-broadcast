@@ -1,6 +1,7 @@
 import {programs,episodeProgram,episodeTitle} from '/programs.js';
 import {buildQueue,nextIds,previousId} from '/player-model.js';
 import {programArt,personArt,programDescriptions} from '/design-data.js';
+import {makeAccountUI} from '/account-ui.js';
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const read=(k,fallback)=>{try{return JSON.parse(localStorage.getItem(k))??fallback;}catch{return fallback;}};
@@ -57,7 +58,15 @@ const time=s=>{if(!Number.isFinite(Number(s)))return '0:00';s=Math.max(0,Math.fl
 const publishedDate=value=>new Date(value).toLocaleDateString('ja-JP',{year:'numeric',month:'long',day:'numeric',timeZone:'Asia/Tokyo'});
 const bytes=n=>n>=1e9?`${(n/1e9).toFixed(2)} GB`:n>=1e6?`${(n/1e6).toFixed(1)} MB`:`${(n/1000).toFixed(0)} KB`;
 const castMarkup=(cast)=>cast.split('・').map(name=>{const p=personArt(name.trim());return `<span class="cast-person">${p?`<img src="${p.src}" class="${p.position}" alt="">`:''}<span>${esc(name.trim())}</span></span>`}).join('');
-const publicPreview=document.documentElement.classList.contains('cloud-public');if(publicPreview){saved=[];history=[];}
+const publicPreview=document.documentElement.classList.contains('cloud-public');if(publicPreview){saved=[];history=[];positions={};}
+let sessionGeneration=0,lastCloudPosition=0;const positionWrites=new Map(),favoriteWrites=new Set();
+const account=makeAccountUI({onSession(data){sessionGeneration++;saved=Array.isArray(data?.favorites)?data.favorites:[];const rows=Array.isArray(data?.history)?data.history:[];history=rows.map(row=>row.episode_id);positions=Object.fromEntries(rows.map(row=>[row.episode_id,row.position_seconds]));render();},onNotice:message=>toast(message)});
+function syncPosition(id,seconds){
+ if(!publicPreview||!account.isSignedIn())return;
+ const generation=sessionGeneration,previous=positionWrites.get(id)||Promise.resolve();
+ const next=previous.catch(()=>{}).then(()=>{if(generation!==sessionGeneration||!account.isSignedIn())return;return account.setPosition(id,seconds);}).catch(()=>toast('再生履歴を同期できませんでした。'));
+ positionWrites.set(id,next);next.finally(()=>{if(positionWrites.get(id)===next)positionWrites.delete(id);});
+}
 function toast(message){$('toast').textContent=message;$('toast').classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('visible'),3400);}
 $('date-label').textContent=new Intl.DateTimeFormat('ja-JP',{month:'long',day:'numeric',weekday:'long'}).format(new Date());
 async function load(){
@@ -129,7 +138,7 @@ function renderQueue(){
  const queueKey=upcoming.map(e=>e.id).join('|')+'|'+String(!!current);if(queueRenderKey!==queueKey){queueRenderKey=queueKey;$('queue-list').innerHTML=upcoming.slice(0,3).map(e=>`<button class="queue-item ${e.channel}" data-play="${e.id}" data-from-queue="true" aria-label="再生：${esc(e.title)}"><span class="queue-cover">${episodeArt(e)}</span><span><b>${esc(episodeTitle(e))}</b><small>${esc(channel(e.channel)?.name)} · ${time(e.duration)}</small></span><span class="queue-play">${icon('play')}</span></button>`).join('')||`<p class="queue-empty">${current?'次のエピソードはありません。':'エピソードを選ぶと、ここに表示されます。'}</p>`;
  $('expanded-queue-list').innerHTML=upcoming.map(e=>`<button class="expanded-queue-item ${esc(e.channel)}" data-play="${esc(e.id)}" data-from-queue="true"><span class="queue-cover">${episodeArt(e)}</span><span><b>${esc(episodeTitle(e))}</b><small>${esc(episodeProgram(e)?.name||channel(e.channel)?.name||'')}</small></span></button>`).join('')||'<p class="queue-empty">次のエピソードはありません。</p>';}
 }
-function save(id){if(publicPreview){toast('ログイン機能は準備中です。');return;}const removing=saved.includes(id);saved=removing?saved.filter(x=>x!==id):[...saved,id];write('yr:saved',saved);render();toast(removing?'あとで聴くから外しました。':'あとで聴くに追加しました。');}
+async function save(id){if(publicPreview){if(!account.isSignedIn()){account.open();return;}if(favoriteWrites.has(id))return;favoriteWrites.add(id);const removing=saved.includes(id),generation=sessionGeneration;try{await account.setFavorite(id,!removing);if(generation!==sessionGeneration)return;saved=removing?saved.filter(x=>x!==id):[...saved,id];render();toast(removing?'あとで聴くから外しました。':'あとで聴くに追加しました。');}catch(error){toast(error.message);}finally{favoriteWrites.delete(id);}return;}const removing=saved.includes(id);saved=removing?saved.filter(x=>x!==id):[...saved,id];write('yr:saved',saved);render();toast(removing?'あとで聴くから外しました。':'あとで聴くに追加しました。');}
 function updatePlayer(){
  document.querySelector('.player-bar').classList.toggle('has-current',!!current);
  const ready=!!current&&Number.isFinite(audio.duration)&&audio.duration>0;
@@ -154,7 +163,7 @@ async function loadCaptions(){
  const id=current?.id;captionEpisode=id;captionCues=[];captionLoading=!!id;renderCaptions();if(!id)return;
  try{const response=await fetch('/api/episodes/'+encodeURIComponent(id)+'/captions');if(response.ok){const cues=await response.json();if(captionEpisode===id&&Array.isArray(cues))captionCues=cues;}}catch{}finally{if(captionEpisode===id){captionLoading=false;renderCaptions();}}
 }
-function persistPosition(){if(!switching&&current&&Number.isFinite(audio.currentTime)){positions[current.id]=audio.ended?0:audio.currentTime;write('yr:positions',positions);}}
+function persistPosition(){if(!switching&&current&&Number.isFinite(audio.currentTime)){positions[current.id]=audio.ended?0:audio.currentTime;if(publicPreview){syncPosition(current.id,positions[current.id]);}else write('yr:positions',positions);}}
 async function play(id,build=true){
  const ep=episodes.find(e=>e.id===id);if(!ep)return;
  if(current?.id===id){if(!audio.paused){audio.pause();return;}try{await audio.play();}catch{toast('再生できませんでした。もう一度お試しください。');}return;}
@@ -165,11 +174,11 @@ async function play(id,build=true){
 }
 function next(){if(!current)return toast('まずエピソードを選んでください。');const id=nextIds(queue,current.id)[0];if(id)play(id,false);else toast('最後のエピソードです。');}
 audio.addEventListener('loadedmetadata',()=>{audio.playbackRate=Number($('speed').value);if(current){const p=Number(positions[current.id]||0);if(Number.isFinite(p)&&p>0&&p<audio.duration-2)audio.currentTime=p;}switching=false;$('total-time').textContent=time(audio.duration);updatePlayer();});
-audio.addEventListener('play',()=>{if(current&&!publicPreview){history=[current.id,...history.filter(id=>id!==current.id)].slice(0,200);write('yr:history',history);}render();});
+audio.addEventListener('play',()=>{if(current&&(!publicPreview||account.isSignedIn())){history=[current.id,...history.filter(id=>id!==current.id)].slice(0,200);if(publicPreview)syncPosition(current.id,audio.currentTime);else write('yr:history',history);}render();});
 audio.addEventListener('pause',()=>{persistPosition();render();});
 audio.addEventListener('error',()=>{toast('音声を読み込めませんでした。ファイルを確認してください。');updatePlayer();});
-audio.addEventListener('timeupdate',()=>{if(captionsEnabled)renderCaptions();$('current-time').textContent=time(audio.currentTime);$('total-time').textContent=time(audio.duration);$('seek').value=audio.duration?audio.currentTime/audio.duration*100:0;$('expanded-seek').value=$('seek').value;$('expanded-current').textContent=time(audio.currentTime);$('expanded-total').textContent=time(audio.duration);if(Date.now()-lastPositionWrite>4000){persistPosition();lastPositionWrite=Date.now();}});
-audio.addEventListener('ended',()=>{if(current){positions[current.id]=0;write('yr:positions',positions);}render();if($('auto-next').checked)next();});
+audio.addEventListener('timeupdate',()=>{if(captionsEnabled)renderCaptions();$('current-time').textContent=time(audio.currentTime);$('total-time').textContent=time(audio.duration);$('seek').value=audio.duration?audio.currentTime/audio.duration*100:0;$('expanded-seek').value=$('seek').value;$('expanded-current').textContent=time(audio.currentTime);$('expanded-total').textContent=time(audio.duration);if(publicPreview){if(Date.now()-lastCloudPosition>30000){persistPosition();lastCloudPosition=Date.now();}}else if(Date.now()-lastPositionWrite>4000){persistPosition();lastPositionWrite=Date.now();}});
+audio.addEventListener('ended',()=>{if(current){positions[current.id]=0;if(publicPreview)syncPosition(current.id,0);else write('yr:positions',positions);}render();if($('auto-next').checked)next();});
 window.addEventListener('pagehide',persistPosition);
 $('hero-play').onclick=()=>{if(featured)play(featured.id);};$('feature-save').onclick=()=>{if(featured)save(featured.id);};
 $('start-listening').onclick=()=>{if(featured)play(featured.id);};
@@ -185,8 +194,8 @@ $('back15').onclick=()=>{if(Number.isFinite(audio.duration))audio.currentTime=Ma
 $('seek').oninput=e=>{if(Number.isFinite(audio.duration))audio.currentTime=audio.duration*Number(e.target.value)/100;};$('speed').onchange=e=>{audio.defaultPlaybackRate=Number(e.target.value);audio.playbackRate=Number(e.target.value);$('mobile-speed').value=e.target.value;$('expanded-speed').value=e.target.value;};$('volume').oninput=e=>{audio.volume=Number(e.target.value);audio.muted=false;};
 $('search').oninput=e=>{query=e.target.value.trim();render();};$('sort').onchange=render;
 document.addEventListener('click',e=>{const b=e.target.closest('[data-view],[data-channel],[data-program],[data-filter],[data-play],[data-save],[data-action]');if(!b)return;
- if(b.dataset.action){if(b.dataset.action==='captions'){captionsEnabled=!captionsEnabled;if(captionsEnabled){if(!$('expanded-player').open&&current)$('expanded-player').showModal();loadCaptions();}else renderCaptions();return;}if(['shuffle-prep','loop-prep','device-prep'].includes(b.dataset.action)){toast('この機能は準備中です。');return;}if(['letter','account'].includes(b.dataset.action)){toast(b.dataset.action==='letter'?'お便り機能は準備中です。':'ログイン機能は準備中です。');return;}programFilter=null;if(b.dataset.action==='programs'){view='home';filter='all';query='';$('search').value='';render();document.querySelector('.channels-section').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});return;}if(b.dataset.action==='search'){view='home';filter='all';query='';$('search').value='';render();$('episodes-section').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});$('search').focus({preventScroll:true});return;}if(b.dataset.action==='add-audio'){modal.show();return;}if(b.dataset.action==='retry'){load().catch(showLoadError);return;}if(b.dataset.action==='browse')view='home';filter='all';query='';$('search').value='';render();$('search').focus();}
- else if(b.dataset.view){if(publicPreview&&['saved','history'].includes(b.dataset.view)){toast('ログイン機能は準備中です。');return;}programFilter=null;view=b.dataset.view;filter='all';query='';$('search').value='';closeMenu();render();window.scrollTo({top:0,behavior:'instant'});}
+ if(b.dataset.action){if(b.dataset.action==='captions'){captionsEnabled=!captionsEnabled;if(captionsEnabled){if(!$('expanded-player').open&&current)$('expanded-player').showModal();loadCaptions();}else renderCaptions();return;}if(['shuffle-prep','loop-prep','device-prep'].includes(b.dataset.action)){toast('この機能は準備中です。');return;}if(b.dataset.action==='account'){if(publicPreview)account.open();else toast('ログイン機能は準備中です。');return;}if(b.dataset.action==='letter'){toast('お便り機能は準備中です。');return;}programFilter=null;if(b.dataset.action==='programs'){view='home';filter='all';query='';$('search').value='';render();document.querySelector('.channels-section').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});return;}if(b.dataset.action==='search'){view='home';filter='all';query='';$('search').value='';render();$('episodes-section').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});$('search').focus({preventScroll:true});return;}if(b.dataset.action==='add-audio'){modal.show();return;}if(b.dataset.action==='retry'){load().catch(showLoadError);return;}if(b.dataset.action==='browse')view='home';filter='all';query='';$('search').value='';render();$('search').focus();}
+ else if(b.dataset.view){if(publicPreview&&['saved','history'].includes(b.dataset.view)&&!account.isSignedIn()){account.open();return;}programFilter=null;view=b.dataset.view;filter='all';query='';$('search').value='';closeMenu();render();window.scrollTo({top:0,behavior:'instant'});}
  else if(b.dataset.program!==undefined){window.history.pushState({program:Number(b.dataset.program)},'',`#program-${b.dataset.program}`);programFilter=Number(b.dataset.program);filter='all';view='home';query='';$('search').value='';render();window.scrollTo({top:0,behavior:'instant'});}
  else if(b.dataset.channel){programFilter=null;filter=b.dataset.channel;view='home';query='';$('search').value='';render();$('episodes-section').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'start'});}
  else if(b.dataset.filter){programFilter=null;filter=b.dataset.filter;render();}
@@ -216,3 +225,4 @@ window.addEventListener('popstate',()=>{const m=/^#program-([0-6])$/.exec(locati
 function showLoadError(){const message='エピソードを読み込めませんでした。';$('episode-list').innerHTML=`<div class="empty-state"><b>${message}</b><button class="text-action" data-action="retry">もう一度読み込む →</button></div>`;toast(message);}
 updatePlayer();
 load().catch(showLoadError);
+if(publicPreview)account.init();
