@@ -1,5 +1,5 @@
 import {authenticationOptions,verifyAuthentication} from './passkeys.mjs';
-import {createSession} from './sessions.mjs';
+import {prepareSession} from './sessions.mjs';
 
 const attemptName='__Host-nagara_passkey_attempt';
 const encoder=new TextEncoder();
@@ -38,17 +38,20 @@ export function makePasskeyLogin({options=authenticationOptions,verify=verifyAut
   const expired=attemptCookie('',0);if(!attempt)return json({error:'ログインできませんでした。'},401,expired);
   let response;try{response=await readBody(request);}catch{return json({error:'データが不正です。'},400,expired);}
   if(!response||typeof response.id!=='string'||!/^[A-Za-z0-9_-]{1,2048}$/.test(response.id))return json({error:'ログインできませんでした。'},401,expired);
-  const row=await env.DB.prepare('SELECT account_id,credential_id,public_key,sign_count,transports FROM passkeys WHERE credential_id=?').bind(response.id).first();
+  const row=await env.DB.prepare('SELECT p.account_id,p.credential_id,p.public_key,p.sign_count,p.transports,COALESCE(g.generation,0) AS generation FROM passkeys p LEFT JOIN account_auth_generations g ON g.account_id=p.account_id WHERE p.credential_id=?').bind(response.id).first();
   if(!row)return json({error:'ログインできませんでした。'},401,expired);
   let result;try{result=await verify(env.AUTH_ORIGIN,attempt.challenge,response,{id:row.credential_id,publicKey:new Uint8Array(row.public_key),counter:row.sign_count,transports:JSON.parse(row.transports)});}catch{return json({error:'ログインできませんでした。'},401,expired);}
   if(!result.verified)return json({error:'ログインできませんでした。'},401,expired);
   const counter=result.authenticationInfo.newCounter;
   if(!Number.isSafeInteger(counter)||counter<0)return json({error:'ログインできませんでした。'},401,expired);
-  const updated=await env.DB.prepare('UPDATE passkeys SET sign_count=? WHERE credential_id=? AND sign_count=? RETURNING account_id').bind(counter,row.credential_id,row.sign_count).first();
-  if(!updated)return json({error:'ログインできませんでした。'},401,expired);
-  const session=await createSession(env.DB,updated.account_id);
+  const session=await prepareSession();
+  const changes=await env.DB.batch([
+   env.DB.prepare('INSERT INTO account_sessions(token_hash,account_id,expires_at) SELECT ?,?,? WHERE EXISTS (SELECT 1 FROM passkeys p LEFT JOIN account_auth_generations g ON g.account_id=p.account_id WHERE p.credential_id=? AND p.account_id=? AND p.sign_count=? AND COALESCE(g.generation,0)=?) RETURNING token_hash').bind(session.tokenHash,row.account_id,session.expiresAt,row.credential_id,row.account_id,row.sign_count,row.generation),
+   env.DB.prepare('UPDATE passkeys SET sign_count=? WHERE credential_id=? AND sign_count=? AND EXISTS (SELECT 1 FROM account_sessions WHERE token_hash=?)').bind(counter,row.credential_id,row.sign_count,session.tokenHash)
+  ]);
+  if(!changes[0]?.results?.length)return json({error:'ログインできませんでした。'},401,expired);
   const headers=new Headers({'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
-  headers.append('Set-Cookie',expired);headers.append('Set-Cookie',session);
+  headers.append('Set-Cookie',expired);headers.append('Set-Cookie',session.cookie);
   return new Response(JSON.stringify({ok:true}),{status:200,headers});
  };
 }

@@ -1,0 +1,74 @@
+import {makePasskeyLogin} from './passkey-login.mjs';
+import {makeEnrollment} from './passkey-enrollment.mjs';
+import {makeRecovery} from './passkey-recovery.mjs';
+import {sendEnrollmentEmail} from './enrollment-email.mjs';
+import {sendRecoveryEmail} from './recovery-email.mjs';
+import {normalizeEmail} from './recovery-crypto.mjs';
+import {rateLimitKey,consumeRateLimit} from './auth-rate-limit.mjs';
+
+const paths=new Set(['/api/auth/passkey/options','/api/auth/passkey/verify','/api/auth/enroll/start','/api/auth/enroll/confirm','/api/auth/enroll/options','/api/auth/enroll/finish','/api/auth/recovery/start','/api/auth/recovery/confirm','/api/auth/recovery/options','/api/auth/recovery/finish']);
+const names={enroll:'__Host-nagara_enroll',recovery:'__Host-nagara_recovery'};
+const cookie=(name,value,age)=>`${name}=${value}; Path=/; Max-Age=${age}; Secure; HttpOnly; SameSite=Strict`;
+const json=(value,status=200,c)=>Response.json(value,{status,headers:{'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff',...(c?{'Set-Cookie':c}:{})}});
+function tokenCookie(request,name){const parts=(request.headers.get('Cookie')||'').split(';').map(x=>x.trim()).filter(x=>x.startsWith(name+'='));const value=parts.length===1?parts[0].slice(name.length+1):'';return /^[a-f0-9]{64}$/.test(value)?value:null;}
+function key(s){if(typeof s!=='string'||!/^[a-f0-9]{64}$/i.test(s))throw new Error('configuration unavailable');return Uint8Array.from(s.match(/../g),x=>parseInt(x,16));}
+async function body(request){
+ if(!/^application\/json(?:\s*;|$)/i.test(request.headers.get('Content-Type')||'')||!request.body||Number(request.headers.get('Content-Length'))>16384)throw new TypeError('invalid request');
+ const reader=request.body.getReader(),parts=[];let size=0;
+ for(;;){const {value,done}=await reader.read();if(done)break;size+=value.byteLength;if(size>16384){await reader.cancel();throw new TypeError('invalid request');}parts.push(value);}
+ const bytes=new Uint8Array(size);let offset=0;for(const part of parts){bytes.set(part,offset);offset+=part.byteLength;}
+ const value=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));if(!value||typeof value!=='object'||Array.isArray(value))throw new TypeError('invalid request');return value;
+}
+
+// Not routed to production until the feature flag and release prerequisites
+// (including notifications, cleanup and real-service tests) are complete.
+export function makeAuthRoutes({login=makePasskeyLogin(),enrollment=makeEnrollment(),recovery=makeRecovery(),sendEnroll=sendEnrollmentEmail,sendRecovery=sendRecoveryEmail}={}){
+ return async function authRoutes(request,env){
+  const url=new URL(request.url),path=url.pathname;if(!paths.has(path))return null;
+  if(request.method!=='POST')return json({error:'許可されていない操作です。'},405);
+  let origin;try{origin=new URL(env.AUTH_ORIGIN);if(origin.protocol!=='https:'||origin.origin!==env.AUTH_ORIGIN||origin.username||origin.password)throw new Error();}catch{return json({error:'認証は準備中です。'},503);}
+  if(url.origin!==origin.origin||request.headers.get('Origin')!==origin.origin)return json({error:'リクエストを確認できません。'},403);
+  let rateKey;try{rateKey=key(env.AUTH_RATE_KEY);}catch{return json({error:'認証は準備中です。'},503);}
+  const ip=request.headers.get('CF-Connecting-IP');if(!ip||!/^[:.0-9a-f]{2,45}$/i.test(ip))return json({error:'リクエストを確認できません。'},403);
+  try{
+   const client=await rateLimitKey(rateKey,'client',ip),limit=await consumeRateLimit(env.DB,client,60,300);
+   if(!limit.allowed)return json({error:'時間をおいてもう一度お試しください。'},429);
+   if(path==='/api/auth/passkey/options'||path==='/api/auth/passkey/verify')return login(request,env);
+   const type=path.includes('/enroll/')?'enroll':'recovery',service=type==='enroll'?enrollment:recovery;
+   const operation=path.slice(path.lastIndexOf('/')+1);
+   let data;try{data=await body(request);}catch{return json({error:'データが不正です。'},400);}
+   if(operation==='start'){
+    let email,lookup,encryption;
+    try{email=normalizeEmail(data.email);lookup=key(env.AUTH_LOOKUP_KEY);encryption=key(env.AUTH_ENCRYPTION_KEY);if(env.AUTH_LOOKUP_KEY.toLowerCase()===env.AUTH_ENCRYPTION_KEY.toLowerCase()||env.AUTH_LOOKUP_KEY.toLowerCase()===env.AUTH_RATE_KEY.toLowerCase()||env.AUTH_ENCRYPTION_KEY.toLowerCase()===env.AUTH_RATE_KEY.toLowerCase()||!env.EMAIL||!env.AUTH_EMAIL_FROM)throw new Error();}
+    catch{return json({error:'入力内容または設定を確認してください。'},400);}
+    const addressKey=await rateLimitKey(rateKey,'destination',email),addressLimit=await consumeRateLimit(env.DB,addressKey,3,3600);
+    if(addressLimit.allowed){
+     if(type==='enroll'){
+      const token=await service.begin(env.DB,email,lookup,encryption);
+      try{await sendEnroll(env.EMAIL,{origin:origin.origin,from:env.AUTH_EMAIL_FROM,to:email,token});}catch{console.error('Enrollment email delivery failed');}
+     }else{
+      const result=await service.issue(env.DB,email,lookup,encryption);
+      if(result)try{await sendRecovery(env.EMAIL,{origin:origin.origin,from:env.AUTH_EMAIL_FROM,to:result.to,token:result.token});}catch{console.error('Recovery email delivery failed');}
+     }
+    }
+    return json({ok:true});
+   }
+   const name=names[type];
+   if(operation==='confirm'){
+    const token=await service.confirm(env.DB,data.token);if(!token)return json({error:'リンクを確認できません。'},400);
+    return json({ok:true},200,cookie(name,token,900));
+   }
+   const token=tokenCookie(request,name);if(!token)return json({error:'操作を確認できません。'},401);
+   if(operation==='options'){
+    const result=await service.options(env.DB,token,origin.origin);return result?json(result):json({error:'操作を確認できません。'},400,cookie(name,'',0));
+   }
+   if(operation==='finish'){
+    const session=await service.finish(env.DB,token,origin.origin,data);if(!session)return json({error:'登録できませんでした。'},400,cookie(name,'',0));
+    const headers=new Headers({'Content-Type':'application/json','Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff'});
+    headers.append('Set-Cookie',cookie(name,'',0));headers.append('Set-Cookie',session);
+    return new Response(JSON.stringify({ok:true}),{status:200,headers});
+   }
+   return json({error:'見つかりません。'},404);
+  }catch{console.error('Authentication request failed');return json({error:'処理できませんでした。'},503);}
+ };
+}

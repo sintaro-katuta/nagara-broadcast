@@ -1,6 +1,6 @@
 import {emailLookup,encryptEmail} from './recovery-crypto.mjs';
 import {registrationOptions,verifyRegistration} from './passkeys.mjs';
-import {createSession} from './sessions.mjs';
+import {prepareSession} from './sessions.mjs';
 
 const enc=new TextEncoder();
 const hex=bytes=>Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
@@ -44,14 +44,16 @@ export function makeEnrollment({options=registrationOptions,verify=verifyRegistr
    let result;try{result=await verify(origin,row.challenge,response);}catch{return null;}
    const credential=result.verified&&result.registrationInfo?.credential;
    if(!credential||typeof credential.id!=='string'||!/^[A-Za-z0-9_-]{1,2048}$/.test(credential.id)||!(credential.publicKey instanceof Uint8Array)||!Number.isSafeInteger(credential.counter)||credential.counter<0)return null;
+   const session=await prepareSession(now*1000);
    try{
     await db.batch([
      db.prepare('INSERT INTO accounts(id) VALUES (?)').bind(row.account_id),
      db.prepare('INSERT INTO recovery_emails(account_id,email_lookup,email_ciphertext,verified_at) VALUES (?,?,?,?)').bind(row.account_id,row.email_lookup,row.email_ciphertext,new Date(now*1000).toISOString()),
-     db.prepare('INSERT INTO passkeys(credential_id,account_id,public_key,sign_count,transports,created_at) VALUES (?,?,?,?,?,?)').bind(credential.id,row.account_id,credential.publicKey,credential.counter,JSON.stringify(credential.transports||[]),new Date(now*1000).toISOString())
+     db.prepare('INSERT INTO passkeys(credential_id,account_id,public_key,sign_count,transports,created_at) VALUES (?,?,?,?,?,?)').bind(credential.id,row.account_id,credential.publicKey,credential.counter,JSON.stringify(credential.transports||[]),new Date(now*1000).toISOString()),
+     db.prepare('INSERT INTO account_sessions(token_hash,account_id,expires_at) VALUES (?,?,?)').bind(session.tokenHash,row.account_id,session.expiresAt)
     ]);
    }catch{return null;}
-   return createSession(db,row.account_id,now*1000);
+   return session.cookie;
   }
  };
 }

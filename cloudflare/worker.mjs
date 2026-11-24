@@ -3,9 +3,11 @@ import {channels,metadata,parseRange,xml} from '../lib/core.mjs';
 import {episodeTitle} from '../public/programs.js';
 import {accountApi} from './account-api.mjs';
 import {verifySession,revokeSession} from './sessions.mjs';
+import {makeAuthRoutes} from './auth-routes.mjs';
 
 const json=(value,status=200)=>Response.json(value,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 const publicEpisode=row=>({id:row.id,title:episodeTitle(row),channel:row.channel,description:row.description,source:row.source,duration:row.duration,size:row.size,date:row.date,audio:`/audio/${row.id}.mp3`,demo:false});
+const authRoutes=makeAuthRoutes();
 async function authorized(request,env){
  if(typeof env.UPLOAD_SECRET!=='string'||env.UPLOAD_SECRET.length<32)return false;
  const provided=request.headers.get('Authorization')||'';
@@ -22,6 +24,9 @@ export default {
   const url=new URL(request.url);
   try{
    if(env.AUTH_ENABLED==='true'){
+    if(env.PASSKEY_API_ENABLED==='true'){
+     const response=await authRoutes(request,env);if(response)return response;
+    }
     if(url.pathname==='/api/auth/logout'&&request.method==='POST'){
      if(request.headers.get('Origin')!==url.origin)return json({error:'リクエストを確認できません。'},403);
      const cookie=await revokeSession(request,env.DB);
