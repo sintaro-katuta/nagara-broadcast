@@ -1,7 +1,6 @@
 import {validateCaptions} from '../lib/captions.mjs';
 import {channels,metadata,parseRange,xml} from '../lib/core.mjs';
 import {episodeTitle} from '../public/programs.js';
-import {oauth} from './oauth.mjs';
 import {accountApi} from './account-api.mjs';
 import {verifySession,revokeSession} from './sessions.mjs';
 
@@ -23,7 +22,6 @@ export default {
   const url=new URL(request.url);
   try{
    if(env.AUTH_ENABLED==='true'){
-    const authResponse=await oauth(request,env);if(authResponse)return authResponse;
     if(url.pathname==='/api/auth/logout'&&request.method==='POST'){
      if(request.headers.get('Origin')!==url.origin)return json({error:'リクエストを確認できません。'},403);
      const cookie=await revokeSession(request,env.DB);
