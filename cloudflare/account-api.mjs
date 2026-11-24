@@ -17,12 +17,13 @@ export async function accountApi(request,db,verifyIdentity) {
  const identity=await verifyIdentity(request);
  if(!identity?.accountId)return json({error:'ログインが必要です。'},401);
  if(request.method!=='GET'&&request.headers.get('Origin')!==url.origin)return json({error:'リクエストを確認できません。'},403);
+ if(request.method!=='GET'&&(!identity.sessionTag||request.headers.get('X-Account-Session')!==identity.sessionTag))return json({error:'アカウントが変更されました。'},409);
  if(url.pathname==='/api/admin/storage'){
   if(request.method!=='GET')return json({error:'許可されていない操作です。'},405);
   if(identity.admin!==true)return json({error:'権限がありません。'},403);
   return json(await storageSummary(db));
  }
- if(url.pathname==='/api/account'&&request.method==='GET')return json(await getAccountData(db,identity.accountId));
+ if(url.pathname==='/api/account'&&request.method==='GET')return json({...await getAccountData(db,identity.accountId),sessionTag:identity.sessionTag});
  if(url.pathname==='/api/account/history'&&request.method==='DELETE'){
   await clearListeningHistory(db,identity.accountId);return json({ok:true});
  }
@@ -38,7 +39,8 @@ export async function accountApi(request,db,verifyIdentity) {
   await setFavorite(db,identity.accountId,body.episodeId,body.enabled);
  }else{
   if(typeof body.positionSeconds!=='number'||!Number.isFinite(body.positionSeconds)||body.positionSeconds<0||body.positionSeconds>604800)return json({error:'再生位置が不正です。'},400);
-  await setListeningPosition(db,identity.accountId,body.episodeId,body.positionSeconds);
+  if(typeof body.writerId!=='string'||!/^[-a-zA-Z0-9_]{16,80}$/.test(body.writerId)||!Number.isSafeInteger(body.sequence)||body.sequence<1)return json({error:'再生位置の更新が不正です。'},400);
+  await setListeningPosition(db,identity.accountId,body.episodeId,body.positionSeconds,body.writerId,body.sequence);
  }
  return json({ok:true});
 }

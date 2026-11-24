@@ -34,6 +34,11 @@ test('public Worker does not expose passkey routes without the release flags',as
  const request=new Request('https://radio.example/api/auth/enroll/start',{method:'POST',headers:{Origin:'https://radio.example'}});
  const response=await worker.fetch(request,{AUTH_ENABLED:'false'});
  assert.equal(response.status,404);
+ const status=await worker.fetch(new Request('https://radio.example/api/auth/status'),{AUTH_ENABLED:'false'});
+ assert.deepEqual(await status.json(),{available:false});
+ const ready={AUTH_ENABLED:'true',PASSKEY_API_ENABLED:'true',AUTH_ORIGIN:'https://radio.example',AUTH_RATE_KEY:'01'.repeat(32),AUTH_LOOKUP_KEY:'02'.repeat(32),AUTH_ENCRYPTION_KEY:'03'.repeat(32),AUTH_EMAIL_FROM:'sender@example.com',EMAIL:{}};
+ assert.deepEqual(await (await worker.fetch(new Request('https://radio.example/api/auth/status'),ready)).json(),{available:true});
+ assert.deepEqual(await (await worker.fetch(new Request('https://radio.example/api/auth/status'),{...ready,AUTH_LOOKUP_KEY:ready.AUTH_RATE_KEY})).json(),{available:false});
 });
 
 test('registration, login and recovery integrate without sending real email',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{

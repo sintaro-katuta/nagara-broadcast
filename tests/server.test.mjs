@@ -15,6 +15,8 @@ test('upload persists, byte streaming works, invalid uploads and cross origin re
  try{
   assert.equal((await fetch(base+'/')).status,200);
   assert.equal((await fetch(base+'/player-model.js')).status,200);
+  assert.equal((await fetch(base+'/account-ui.js')).status,200);
+  assert.equal((await fetch(base+'/webauthn.js')).status,200);
   const runtime=await fetch(base+'/flowbite.js');assert.equal(runtime.status,200);assert.match(runtime.headers.get('content-type'),/javascript/);
   assert.equal((await post(params,mp3,{Origin:'https://untrusted.example'})).status,403);
   assert.equal((await post(params,'not audio')).status,415);
