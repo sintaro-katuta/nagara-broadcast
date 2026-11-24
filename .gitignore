@@ -6,3 +6,4 @@ output/
 __pycache__/
 cloudflare/public/
 .wrangler/
+.cache/acestep/

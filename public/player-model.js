@@ -6,3 +6,7 @@ export function nextIds(queue,current){
  const index=queue.indexOf(current);
  return index<0?[]:queue.slice(index+1);
 }
+export function previousId(queue,current){
+ const index=queue.indexOf(current);
+ return index>0?queue[index-1]:null;
+}

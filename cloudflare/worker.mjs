@@ -1,3 +1,4 @@
+import {validateCaptions} from '../lib/captions.mjs';
 import {channels,metadata,parseRange,xml} from '../lib/core.mjs';
 import {episodeTitle} from '../public/programs.js';
 
@@ -42,6 +43,18 @@ export default {
     await env.DB.prepare('INSERT OR IGNORE INTO episodes (id,title,channel,description,source,duration,size,date,object_key) VALUES (?,?,?,?,?,?,?,?,?)').bind(id,meta.title,meta.channel,meta.description,meta.source,meta.duration,length,date,objectKey).run();
     const row=await env.DB.prepare('SELECT id,title,channel,description,source,duration,size,date FROM episodes WHERE id=?').bind(id).first();
     return json(publicEpisode(row),201);
+   }
+   const captions=/^\/api\/episodes\/([\w-]+)\/captions$/.exec(url.pathname);
+   if(captions&&['GET','PUT'].includes(request.method)){
+    if(request.method==='PUT'&&!await authorized(request,env))return json({error:'認証が必要です。'},401);
+    const row=await env.DB.prepare('SELECT id FROM episodes WHERE id=?').bind(captions[1]).first();
+    if(!row)return json({error:'エピソードが見つかりません。'},404);
+    const key=`captions/${captions[1]}.json`;
+    if(request.method==='GET'){const object=await env.AUDIO.get(key);if(!object)return json({error:'字幕がありません。'},404);return new Response(object.body,{headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});}
+    if(Number(request.headers.get('content-length'))>1000000)return json({error:'字幕が大きすぎます。'},413);
+    const body=await request.text();if(body.length>1000000)return json({error:'字幕が大きすぎます。'},413);
+    try{validateCaptions(JSON.parse(body));}catch{return json({error:'字幕データが不正です。'},400);}
+    await env.AUDIO.put(key,body,{httpMetadata:{contentType:'application/json'}});return json({ok:true});
    }
    const match=/^\/audio\/([\w-]+)\.mp3$/.exec(url.pathname);
    if(match&&['GET','HEAD'].includes(request.method)){

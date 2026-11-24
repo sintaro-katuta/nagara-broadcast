@@ -2,7 +2,7 @@
 
 launchd が6時に制作し、7時と以後の定期実行で公開と再試行を行う。起動直後にも実行する。日本時間の当日分だけを対象とし、前日分を大量に遡らない。実際の launchd の時刻は Mac のタイムゾーンに依存するため、日本時間に設定する。
 
-`lib/weekly-programs.mjs` に番組・声・読みを保存し、`lib/weekly-production.mjs` が曜日と制作結果を検証する。`scripts/weekly-run.mjs` は Codex の JSON 出力から台本を作り、AivisSpeech と ffmpeg で MP3 を作成し ffprobe で確認する。台詞の完全性や聴感は音声の長さだけでは保証できない。ニュース・記事の自動取得、BGM・ジングル、音声の品質自動判定、フィードバック入力画面は未実装。
+`lib/weekly-programs.mjs` に番組・声・読みを保存し、`lib/weekly-production.mjs` が曜日と制作結果を検証する。`scripts/weekly-run.mjs` は Codex の JSON 出力から台本を作り、AivisSpeech と ffmpeg で MP3 を作成し ffprobe で確認する。BGM・ジングル・曲の自動制作は [週間音楽](../weekly-sound/design.md) を参照。台詞の完全性や聴感は音声の長さだけでは保証できない。ニュース・記事の自動取得、音声の品質自動判定、フィードバック入力画面は未実装。
 
 ローカルの data/weekly に日別の台本・音声・状態と履歴を残す。日付のロックと公開済み状態で重複を抑える。異常終了後にロックや未検証音声が残った場合は、自動で削除せず運用者の確認を要する。
 

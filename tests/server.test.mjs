@@ -21,6 +21,13 @@ test('upload persists, byte streaming works, invalid uploads and cross origin re
   assert.equal((await post({...params,channel:'invalid'},mp3)).status,400);
   assert.equal((await post(params,mp3,{'Content-Type':'text/plain'})).status,415);
   const response=await post(params,mp3);assert.equal(response.status,201);const episode=await response.json();assert.equal(episode.size,mp3.length);
+  const captionUrl=base+'/api/episodes/'+episode.id+'/captions';
+  assert.equal((await fetch(captionUrl)).status,404);
+  const cues=[{start:0,end:3,text:'こんにちは'}];
+  assert.equal((await fetch(captionUrl,{method:'PUT',headers:{Origin:'https://untrusted.example'},body:JSON.stringify(cues)})).status,403);
+  assert.equal((await fetch(captionUrl,{method:'PUT',body:JSON.stringify([{start:3,end:2,text:'bad'}])})).status,400);
+  assert.equal((await fetch(captionUrl,{method:'PUT',body:JSON.stringify(cues)})).status,200);
+  assert.deepEqual(await (await fetch(captionUrl)).json(),cues);
   const other=await Promise.all([post({...params,title:'second'},mp3),post({...params,title:'third'},mp3)]);assert.ok(other.every(r=>r.status===201));
   assert.equal((await (await fetch(base+'/api/episodes')).json()).episodes.length,3);
   const partial=await fetch(base+episode.audio,{headers:{Range:'bytes=10-19'}});assert.equal(partial.status,206);assert.equal((await partial.arrayBuffer()).byteLength,10);assert.equal(partial.headers.get('content-range'),'bytes 10-19/103');

@@ -6,6 +6,7 @@ import {pipeline} from 'node:stream/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'node:crypto';
+import {validateCaptions} from './lib/captions.mjs';
 import {channels,parseRange,metadata,xml} from './lib/core.mjs';
 
 const root=path.dirname(fileURLToPath(import.meta.url));
@@ -68,12 +69,23 @@ export async function createApp({dataDir=path.join(root,'data')}={}) {
         if(req.method==='HEAD') return res.end();
         const stream=createReadStream(file,{start,end}); stream.on('error',()=>res.destroy());res.on('close',()=>stream.destroy());stream.pipe(res);return;
       }
+      const captionMatch=/^\/api\/episodes\/([\w-]+)\/captions$/.exec(url.pathname);
+      if(captionMatch && ['GET','PUT'].includes(req.method)) {
+        if(!episodes.some(e=>e.id===captionMatch[1]))return json(404,{error:'エピソードが見つかりません。'});
+        const file=path.join(audioDir,captionMatch[1]+'.captions.json');
+        if(req.method==='GET'){try{return json(200,JSON.parse(await readFile(file,'utf8')));}catch(e){if(e.code==='ENOENT')return json(404,{error:'字幕がありません。'});throw e;}}
+        if(req.headers.origin && req.headers.origin!=='http://'+host)return json(403,{error:'別サイトからの更新はできません。'});
+        let body='';for await(const chunk of req){body+=chunk;if(body.length>1000000)return json(413,{error:'字幕が大きすぎます。'});}
+        let cues;try{cues=validateCaptions(JSON.parse(body));}catch{return json(400,{error:'字幕データが不正です。'});}
+        await writeFile(file,JSON.stringify(cues));return json(200,{ok:true});
+      }
       if(req.method==='GET' && url.pathname==='/feed.xml') {
         const base='http://'+host;
         const items=episodes.map(e=>`<item><title>${xml(e.title)}</title><description>${xml(e.description)}</description><guid isPermaLink="false">${xml(e.id)}</guid><pubDate>${new Date(e.date).toUTCString()}</pubDate><enclosure url="${xml(base+e.audio)}" length="${e.size}" type="audio/mpeg"/></item>`).join('');
         res.writeHead(200,{'Content-Type':'application/rss+xml; charset=utf-8'});return res.end(`<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>ながら放送</title><link>${base}</link><description>いつもの時間に、気ままな声を。</description><language>ja</language>${items}</channel></rss>`);
       }
-      const files={'/':'index.html','/app.js':'app.js','/programs.js':'programs.js','/player-model.js':'player-model.js','/flowbite.js':'flowbite.js','/styles.css':'styles.css','/favicon.svg':'favicon.svg',...Object.fromEntries(['monday','tuesday','wednesday','thursday','friday','saturday','sunday'].map(day=>[`/programs/${day}.png`,`programs/${day}.png`]))};
+      const designAssets=['nagara-icon-orange.png','monday-program-distinct.png','tuesday-program-individual.png','wednesday-program-record-centered.png','thursday-program-distinct.png','friday-program-distinct.png','saturday-program-distinct.png','sunday-program-distinct.png','monday-presenters.png','daichi-voice-match.png','wednesday-presenters.png','thursday-presenters.png','friday-presenters.png','saturday-presenter.png','sunday-presenters.png'];
+      const files={'/':'index.html','/app.js':'app.js','/programs.js':'programs.js','/design-data.js':'design-data.js','/design-descriptions.js':'design-descriptions.js','/player-model.js':'player-model.js','/flowbite.js':'flowbite.js','/styles.css':'styles.css','/favicon.svg':'favicon.svg',...Object.fromEntries(designAssets.map(name=>[`/design-assets/${name}`,`design-assets/${name}`])),...Object.fromEntries(['monday','tuesday','wednesday','thursday','friday','saturday','sunday'].map(day=>[`/programs/${day}.png`,`programs/${day}.png`]))};
       if(['GET','HEAD'].includes(req.method) && files[url.pathname]) {
         const body=await readFile(path.join(root,'public',files[url.pathname]));
         const type={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.png':'image/png'}[path.extname(files[url.pathname])];

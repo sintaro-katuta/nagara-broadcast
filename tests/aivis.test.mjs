@@ -101,6 +101,9 @@ test('CLI defaults to generation only and rejects incomplete or unknown argument
  assert.equal(parseArgs(['example.json','--ingest','--output','radio.mp3']).ingest,true);
  assert.equal(parseArgs(['--help']).help,true);
  assert.equal(parseArgs(['example.json','--program']).program,true);
+ assert.equal(parseArgs(['example.json','--weekly-sound','2026-11-03']).weeklySound,'2026-11-03');
+ assert.throws(()=>parseArgs(['example.json','--weekly-sound','2026-02-30']));
+ assert.throws(()=>parseArgs(['example.json','--program','--weekly-sound','2026-11-03']));
  for(const args of [[],['example.json','--speed','1'],['example.json','--output'],['a.json','b.json'],['a.json','--radio-url','http://localhost:4317']])assert.throws(()=>parseArgs(args));
 });
 

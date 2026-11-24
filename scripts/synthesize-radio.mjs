@@ -1,16 +1,17 @@
-import {readFile,writeFile,mkdtemp,mkdir,rm,copyFile,stat} from 'node:fs/promises';
+import {readFile,writeFile,mkdtemp,mkdir,rm,copyFile,stat,cp} from 'node:fs/promises';
 import {constants} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
+import {makeCaptions} from '../lib/captions.mjs';
 import {DEFAULT_ENGINE_URL,SPEAKING_RATE,localOrigin,validateScript,synthesizeDialogue} from '../lib/aivis.mjs';
 const run=promisify(execFile);
 
 export function parseArgs(args){
  const options={ingest:false};
- const values={'--engine':'engine','--output':'output','--radio-url':'radioUrl'};
+ const values={'--engine':'engine','--output':'output','--radio-url':'radioUrl','--weekly-sound':'weeklySound'};
  for(let i=0;i<args.length;i++){
   const arg=args[i];
   if(arg==='--help'||arg==='-h'){options.help=true;continue;}
@@ -27,6 +28,8 @@ export function parseArgs(args){
  }
  if(!options.help&&!options.script)throw new Error('台本JSONを指定してください。--helpで使い方を確認できます。');
  if(options.radioUrl&&!options.ingest)throw new Error('--radio-urlは--ingestと一緒に指定してください。');
+ if(options.program&&options.weeklySound)throw new Error('--program と --weekly-sound は同時に使えません。');
+ if(options.weeklySound&&(!/^\d{4}-\d{2}-\d{2}$/.test(options.weeklySound)||Number.isNaN(Date.parse(options.weeklySound))||new Date(options.weeklySound+'T00:00:00Z').toISOString().slice(0,10)!==options.weeklySound))throw new Error('--weekly-sound には実在する YYYY-MM-DD を指定してください。');
  return options;
 }
 
@@ -45,6 +48,7 @@ const help=`使い方: node scripts/synthesize-radio.mjs 台本.json [オプシ�
   --output PATH     生成するMP3のパス（既存ファイルは上書きしません）
   --ingest          完成したMP3をローカルのながら放送に追加
   --program         構成台本のジングル・BGM・曲を加えた番組として制作
+  --weekly-sound 日付   曜日別BGMとジングルを追加
   --radio-url URL   ながら放送のURL（既定: http://127.0.0.1:4317）
   --help            この説明を表示
 
@@ -71,6 +75,7 @@ export async function main(args=process.argv.slice(2)){
  if(path.extname(output).toLowerCase()!=='.mp3')throw new Error('--outputには拡張子.mp3のパスを指定してください。');
  try{await stat(output);throw new Error(`出力先にファイルが存在します。別のパスを指定してください: ${output}`);}catch(error){if(error.code!=='ENOENT')throw error;}
  if(options.program){try{await stat(output+'.production');throw new Error(`制作データが既に存在します。別の出力名を指定してください: ${output}.production`);}catch(error){if(error.code!=='ENOENT')throw error;}}
+ if(options.weeklySound){try{await stat(output+'.sound');throw new Error(`音素材が既に存在します。別のパスを指定してください: ${output}.sound`);}catch(error){if(error.code!=='ENOENT')throw error;}}
  try{await run('ffmpeg',['-version']);}catch{throw new Error('ffmpegが見つかりません。インストールしてから実行してください。');}
  const work=await mkdtemp(path.join(tmpdir(),'yorimichi-aivis-'));
  try{
@@ -83,7 +88,9 @@ export async function main(args=process.argv.slice(2)){
    try{await run('ffmpeg',['-hide_banner','-loglevel','error','-nostdin','-y','-i',source,'-af',`aresample=24000,aformat=sample_fmts=s16:channel_layouts=mono${echo},apad=pad_dur=${pauseMs/1000}`,'-ar','24000','-ac','1','-c:a','pcm_s16le',path.join(work,name)]);}
    catch{throw new Error(`発言${index+1}の音声を整えられませんでした。ffmpegの動作を確認してください。`);}
    parts.push(`file '${name}'`);
-   produced.push({index,file:name,speaker:script.turns[index].speaker,text:script.turns[index].text,section:script.turns[index].section,pauseMs,voice});
+   let duration;
+   {const result=await run('ffprobe',['-v','error','-show_entries','format=duration','-of','default=noprint_wrappers=1:nokey=1',path.join(work,name)]);duration=Number(result.stdout.trim());if(!Number.isFinite(duration)||duration<=0)throw new Error(`発言${index+1}の長さを確認できませんでした。`);}
+   produced.push({index,file:name,speaker:script.turns[index].speaker,text:script.turns[index].text,section:script.turns[index].section,pauseMs,voice,duration});
    console.log(`${index+1}/${script.turns.length} ${voice.name}（${voice.styleName}）`);
   }});
   await writeFile(path.join(work,'parts.txt'),parts.join('\n')+'\n');
@@ -103,7 +110,23 @@ export async function main(args=process.argv.slice(2)){
   }
   catch(error){throw new Error(options.program?`番組の構成に失敗しました。生成済みの台詞は ${output}.production に残しています。${error.stderr?.trim()||error.message}`:'MP3への変換に失敗しました。ffmpegがlibmp3lameに対応しているか確認してください。');}
   await mkdir(path.dirname(output),{recursive:true});
-  await copyFile(encoded,output,constants.COPYFILE_EXCL);
+  if(options.weeklySound){
+   const markers=script.turns.map((turn,index)=>turn.musicAfter===true?index:-1).filter(index=>index>=0);
+   if(markers.length>1||markers[0]===0||markers[0]===script.turns.length-1)throw new Error('短い曲を挿入する位置が不正です。');
+   const cutoff=markers.length?markers[0]+1:Math.floor(produced.length/2);
+   const split=produced.slice(0,cutoff).reduce((total,part)=>total+part.duration,0);
+   const withMusic=path.join(work,'with-music.mp3'),assets=path.join(work,'weekly-sound');
+   const theme=`${script.title||''} ${script.description||''}`;
+   const mood=/悩み|不安|疲れ|落ち込|休む|静か/.test(theme)?2:/発見|好奇心|仕組み|疑問|不思議/.test(theme)?4:/振り返|気持ち|思い出|考える/.test(theme)?5:/楽しい|嬉しい|わくわく|笑顔/.test(theme)?1:null;
+   const soundArgs=[fileURLToPath(new URL('./weekly-sound.py',import.meta.url)),'--date',options.weeklySound,'--input',encoded,'--output',withMusic,'--assets',assets,'--split',String(split)];
+   if(mood)soundArgs.push('--mood',String(mood));
+   try{await run('python3',soundArgs,{maxBuffer:10*1024*1024});}
+   catch(error){throw new Error(`BGM・ジングルの作成に失敗しました。音声は公開しません。${error.stderr?.trim()||error.message}`);}
+   await cp(assets,output+'.sound',{recursive:true,errorOnExist:true,force:false});
+   await writeFile(output+'.captions.json',JSON.stringify(makeCaptions(produced,{intro:2,splitIndex:cutoff,transition:1.5})),{flag:'wx'});
+   await copyFile(withMusic,output,constants.COPYFILE_EXCL);
+   console.log(`音素材・制作情報: ${output}.sound`);
+  }else await copyFile(encoded,output,constants.COPYFILE_EXCL);
   console.log(`MP3を作成しました: ${output}`);
   console.log(`声: ${Object.values(voices).map(voice=>voice.name).join(' / ')}、話速: ${SPEAKING_RATE}`);
  }finally{await rm(work,{recursive:true,force:true});}

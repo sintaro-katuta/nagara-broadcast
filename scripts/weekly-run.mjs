@@ -4,6 +4,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {makeScript,japaneseDate,afterRelease,beforeProduction} from '../lib/weekly-production.mjs';
 import {programForDate} from '../lib/weekly-programs.mjs';
+import {buildWeeklyPrompt} from '../lib/weekly-prompt.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const work=process.env.RADIO_WEEKLY_DIR||path.join(root,'data','weekly');
@@ -41,14 +42,14 @@ async function prepare(){
   const schema={type:'object',properties:{topic:{type:'string'},description:{type:'string'},turns:{type:'array',items:{type:'object',properties:{speaker:{type:'string',enum:programme.cast.map(c=>c.id)},text:{type:'string'}},required:['speaker','text'],additionalProperties:false}}},required:['topic','description','turns'],additionalProperties:false};
   const schemaFile=path.join(dayDir,'schema.json'), draftFile=path.join(dayDir,'draft.json');
   await writeJson(schemaFile,schema);
-  const bios=await readFile(path.join(root,'docs','personality-and-voice-candidates.md'),'utf8');
-  const prompt=`あなたは架空のラジオ番組の台本作家です。今日の番組: ${JSON.stringify(programme)}。日付: ${date}。過去の話題（重複を避ける）: ${JSON.stringify(previous)}。直近の台本（設定の整合用、同じ小話は繰り返さない）: ${lastScript.slice(0,10000)}。フィードバック: ${feedback.slice(0,5000)}。人物設定: ${bios}\n日本語のオリジナル台本をJSONのみで出力。topic は日付や番組名を含めず、内容を表す約30文字のキャッチーなタイトルにする。台詞合計1000〜1600文字、8〜40発言。冒頭、フリートーク、本題、締めの流れ。読み上げ文中の名前は指定された読みをひらがなで書く。${programme.cast.length===1?'一人語りにする。':'二人が互いの話を受け、全員が複数回話す。'} 架空の体験は創作設定として扱い、実際の出来事やニュース、実在の投稿と偽らない。時刻や次回日付は断言しない。根拠が必要な具体的な事実を作らない。音楽の歌詞、著作物の引用、架空のお便りや広告は入れない。`;
+  const bios=await readFile(path.join(root,'docs','weekly-personas.md'),'utf8');
+  const prompt=buildWeeklyPrompt({programme,date,previous,lastScript,feedback,bios});
   await cmd(process.env.RADIO_CODEX||'/opt/homebrew/bin/codex',['exec','--skip-git-repo-check','--ephemeral','-s','read-only','--output-schema',schemaFile,'-o',draftFile,prompt]);
   const draft=JSON.parse(await readFile(draftFile,'utf8'));
   const script=makeScript(date,draft);await writeJson(scriptFile,script);
  }
  const script=JSON.parse(await readFile(scriptFile,'utf8'));
- await cmd(process.execPath,[path.join(root,'scripts','synthesize-radio.mjs'),scriptFile,'--engine',engine,'--output',mp3]);
+ await cmd(process.execPath,[path.join(root,'scripts','synthesize-radio.mjs'),scriptFile,'--engine',engine,'--output',mp3,'--weekly-sound',date]);
  const duration=Number((await cmd('ffprobe',['-v','error','-show_entries','format=duration','-of','default=noprint_wrappers=1:nokey=1',mp3])).trim());
  if(!Number.isFinite(duration)||duration<20||duration>1800)throw new Error('音声の長さを検証できませんでした。');
  await writeJson(path.join(dayDir,'ready.json'),{date,title:script.title,duration});
@@ -72,6 +73,8 @@ async function publish(){
   if(!result.ok)throw new Error(`サイトへの追加に失敗しました: HTTP ${result.status}`);
   episode=await result.json();
  }
+ const captionFile=mp3+'.captions.json';
+ if(await exists(captionFile)){const result=await fetchLocal(new URL('/api/episodes/'+episode.id+'/captions',radio),{method:'PUT',headers:{'Content-Type':'application/json'},body:await readFile(captionFile)});if(result.status===404)console.warn('ローカルの字幕 API は未対応です。字幕は生成済みファイルに保存されています。');else if(!result.ok)throw new Error(`ローカル字幕の保存に失敗しました: HTTP ${result.status}`);}
  const cloudFile=path.join(work,'cloud.json');
  if(await exists(cloudFile)){
   const cloud=JSON.parse(await readFile(cloudFile,'utf8'));
@@ -82,6 +85,8 @@ async function publish(){
   const u=new URL('/api/episodes',target);u.search=new URLSearchParams({channel:script.channel,title:script.title,description:script.description,duration:String(JSON.parse(await readFile(path.join(dayDir,'ready.json'),'utf8')).duration)}).toString();
   const result=await fetch(u,{method:'POST',headers:{'Content-Type':'audio/mpeg','Authorization':`Bearer ${secret}`,'X-Episode-Key':date,'User-Agent':`Mozilla/5.0 (compatible; YorimichiRadio/1.0; +${target.origin}/)`},body:await readFile(mp3),signal:AbortSignal.timeout(120000),redirect:'error'});
   if(!result.ok)throw new Error(`Cloudflareへの追加に失敗しました: HTTP ${result.status}`);
+  const cloudEpisode=await result.json();
+  if(await exists(captionFile)){const captions=await fetch(new URL('/api/episodes/'+cloudEpisode.id+'/captions',target),{method:'PUT',headers:{'Content-Type':'application/json','Authorization':`Bearer ${secret}`},body:await readFile(captionFile),signal:AbortSignal.timeout(120000),redirect:'error'});if(captions.status===404)console.warn('公開先の字幕 API は未対応です。字幕は生成済みファイルに保存されています。');else if(!captions.ok)throw new Error(`字幕の公開に失敗しました: HTTP ${captions.status}`);}
  }
  const historyFile=path.join(work,'history.json');
  const history=await readFile(historyFile,'utf8').then(JSON.parse).catch(e=>{if(e.code==='ENOENT')return [];throw e;});
