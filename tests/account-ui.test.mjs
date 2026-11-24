@@ -149,8 +149,23 @@ test('position checkpoints during revalidation use the previous session and refr
  const ui=makeAccountUI({onSession:value=>states.push(value),onNotice(){}});await ui.init();ui.revalidate();assert.equal(ui.isSignedIn(),false);
  const send=createPositionWriter(ui,'writer-1234567890',()=>assert.fail('unexpected write failure'));await send('ep',45);
  assert.equal(requests[0].headers['X-Account-Session'],'1'.repeat(64));assert.equal(JSON.parse(requests[0].body).positionSeconds,45);
- await new Promise(resolve=>setTimeout(resolve,0));completeOldGet(Response.json({favorites:[],history:[{episode_id:'ep',position_seconds:10}],sessionTag:'1'.repeat(64)}));await new Promise(resolve=>setTimeout(resolve,0));
+ completeOldGet(Response.json({favorites:[],history:[{episode_id:'ep',position_seconds:10}],sessionTag:'1'.repeat(64)}));await new Promise(resolve=>setTimeout(resolve,0));
  assert.equal(states.at(-1).history[0].position_seconds,45);
+});
+
+test('refresh never publishes a checkpoint read before an overlapping position write',async()=>{
+ const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout'];
+ for(const order of ['write-first-get-first','write-first-put-first','get-first-write-first']){
+  const elements=Object.fromEntries(names.map(name=>[name,{hidden:false,disabled:false,textContent:'',focus(){},reset(){}}]));elements['account-dialog'].querySelectorAll=()=>[];
+  globalThis.location={hash:'',pathname:'/',search:''};globalThis.history={state:null,replaceState(){}};globalThis.BroadcastChannel=undefined;globalThis.window={};globalThis.document={getElementById:id=>elements[id],addEventListener(){}};
+  let accountCalls=0,completeGet,completePut,serverPosition=10;const get=new Promise(resolve=>{completeGet=resolve}),put=new Promise(resolve=>{completePut=resolve});const states=[];
+  globalThis.fetch=async(path)=>{if(path==='/api/auth/status')return Response.json({available:true});if(path==='/api/account/history'){await put;serverPosition=45;return new Response(null,{status:200});}if(path==='/api/account'){accountCalls++;if(accountCalls===2)return get;return Response.json({favorites:[],history:[{episode_id:'ep',position_seconds:serverPosition}],sessionTag:'1'.repeat(64)});}throw new Error('unexpected path');};
+  const {makeAccountUI}=await import('../public/account-ui.js?test=overlap');const ui=makeAccountUI({onSession:value=>states.push(value),onNotice(){}});await ui.init();
+  let write;if(order==='get-first-write-first'){ui.revalidate();write=ui.setPosition('ep',45,'writer-1234567890',1);}else{write=ui.setPosition('ep',45,'writer-1234567890',1);ui.revalidate();}
+  const stale=()=>Response.json({favorites:[],history:[{episode_id:'ep',position_seconds:10}],sessionTag:'1'.repeat(64)});
+  if(order==='write-first-put-first'){completePut();await write;completeGet(stale());}else{completeGet(stale());await new Promise(resolve=>setTimeout(resolve,0));assert.equal(states.at(-1),null,order);completePut();await write;}
+  await new Promise(resolve=>setTimeout(resolve,0));assert.equal(states.at(-1).history[0].position_seconds,45,order);
+ }
 });
 
 test('a changed session rejects an old checkpoint while account data is refreshing',async()=>{
