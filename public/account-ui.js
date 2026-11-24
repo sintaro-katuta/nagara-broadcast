@@ -15,7 +15,7 @@ async function api(path,body,headers={}){
 let library;
 function webauthn(){
  if(library)return library;
- library=new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='/webauthn.js';script.onload=()=>window.SimpleWebAuthnBrowser?resolve(window.SimpleWebAuthnBrowser):reject(new Error());script.onerror=()=>reject(new Error());document.head.append(script);});
+ library=new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='/webauthn.js';script.onload=()=>window.SimpleWebAuthnBrowser?resolve(window.SimpleWebAuthnBrowser):reject(new Error());script.onerror=()=>reject(new Error());document.head.append(script);}).catch(error=>{library=null;throw error;});
  return library;
 }
 

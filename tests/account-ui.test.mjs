@@ -115,6 +115,18 @@ test('an account request failure retries on network recovery',async()=>{
  await ui.init();assert.deepEqual(states,[]);failing=false;events.online();await new Promise(resolve=>setTimeout(resolve,0));assert.equal(ui.isSignedIn(),true);assert.equal(states.at(-1).ready,true);
 });
 
+test('a failed WebAuthn script load can be retried without reloading the page',async()=>{
+ const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout'];
+ const elements=Object.fromEntries(names.map(name=>[name,{hidden:false,disabled:false,textContent:'',focus(){},reset(){}}]));const dialog=elements['account-dialog'];dialog.querySelectorAll=()=>[];dialog.close=()=>{};
+ globalThis.location={hash:'',pathname:'/',search:''};globalThis.history={state:null,replaceState(){}};globalThis.BroadcastChannel=undefined;
+ globalThis.window={SimpleWebAuthnBrowser:{async startAuthentication(){return {id:'response'}}}};
+ let scripts=0,signed=false;globalThis.document={getElementById:id=>elements[id],addEventListener(){},createElement:()=>({}),head:{append(script){scripts++;queueMicrotask(()=>scripts===1?script.onerror():script.onload())}}};
+ globalThis.fetch=async(path)=>{if(path==='/api/auth/status')return Response.json({available:true});if(path==='/api/account')return signed?Response.json({favorites:[],history:[],sessionTag:'1'.repeat(64)}):new Response(null,{status:401});if(path==='/api/auth/passkey/options')return Response.json({challenge:'test'});if(path==='/api/auth/passkey/verify'){signed=true;return Response.json({ok:true});}throw new Error('unexpected path');};
+ const {makeAccountUI}=await import('../public/account-ui.js?test=webauthn-retry');const ui=makeAccountUI({onSession(){},onNotice(){}});await ui.init();
+ await elements['account-signin'].onclick();assert.equal(scripts,1);assert.equal(ui.isSignedIn(),false);
+ await elements['account-signin'].onclick();assert.equal(scripts,2);assert.equal(ui.isSignedIn(),true);
+});
+
 test('revalidation discards an older account response after a favorite write',async()=>{
  const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout'];
  const elements=Object.fromEntries(names.map(name=>[name,{hidden:false,disabled:false,textContent:'',focus(){},reset(){}}]));elements['account-dialog'].querySelectorAll=()=>[];
