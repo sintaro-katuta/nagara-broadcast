@@ -1,6 +1,9 @@
 import {validateCaptions} from '../lib/captions.mjs';
 import {channels,metadata,parseRange,xml} from '../lib/core.mjs';
 import {episodeTitle} from '../public/programs.js';
+import {oauth} from './oauth.mjs';
+import {accountApi} from './account-api.mjs';
+import {verifySession,revokeSession} from './sessions.mjs';
 
 const json=(value,status=200)=>Response.json(value,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 const publicEpisode=row=>({id:row.id,title:episodeTitle(row),channel:row.channel,description:row.description,source:row.source,duration:row.duration,size:row.size,date:row.date,audio:`/audio/${row.id}.mp3`,demo:false});
@@ -19,6 +22,15 @@ export default {
  async fetch(request,env){
   const url=new URL(request.url);
   try{
+   if(env.AUTH_ENABLED==='true'){
+    const authResponse=await oauth(request,env);if(authResponse)return authResponse;
+    if(url.pathname==='/api/auth/logout'&&request.method==='POST'){
+     if(request.headers.get('Origin')!==url.origin)return json({error:'リクエストを確認できません。'},403);
+     const cookie=await revokeSession(request,env.DB);
+     return new Response(JSON.stringify({ok:true}),{headers:{'Content-Type':'application/json','Cache-Control':'no-store','Set-Cookie':cookie}});
+    }
+    const accountResponse=await accountApi(request,env.DB,req=>verifySession(req,env.DB));if(accountResponse)return accountResponse;
+   }
    if(request.method==='GET'&&url.pathname==='/api/episodes'){
     const episodes=await list(env);return json({episodes,channels,storageBytes:episodes.reduce((n,x)=>n+x.size,0)});
    }
