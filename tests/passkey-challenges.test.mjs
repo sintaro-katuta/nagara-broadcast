@@ -1,0 +1,20 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {storeChallenge,consumeChallenge} from '../cloudflare/passkey-challenges.mjs';
+const sqlite=await import('node:sqlite').catch(()=>null);
+test('challenges are purpose-bound, short-lived and consumed only once',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{
+ const sql=new sqlite.DatabaseSync(':memory:');sql.exec('PRAGMA foreign_keys=ON');
+ for(const f of ['../cloudflare/schema.sql','../cloudflare/migrations/0001_account_data.sql','../cloudflare/migrations/0003_passkeys.sql'])sql.exec(readFileSync(new URL(f,import.meta.url),'utf8'));
+ sql.exec("INSERT INTO accounts VALUES ('a')");
+ const db={prepare(q){return {bind(...args){return {async run(){return sql.prepare(q).run(...args)},async first(){return sql.prepare(q).get(...args)||null}}}}}};
+ const code='a'.repeat(43),second='b'.repeat(43);
+ await storeChallenge(db,code,'registration','a',1000000);
+ assert.equal(await consumeChallenge(db,code,'authentication',1000000),null);
+ assert.equal((await consumeChallenge(db,code,'registration',1000000)).account_id,'a');
+ assert.equal(await consumeChallenge(db,code,'registration',1000000),null);
+ await storeChallenge(db,second,'authentication',null,1000000);
+ assert.equal(await consumeChallenge(db,second,'authentication',1300000),null);
+ await assert.rejects(storeChallenge(db,'x','registration',null));
+ sql.close();
+});

@@ -1,0 +1,31 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {getAccountData,setFavorite,setListeningPosition,clearListeningHistory} from '../cloudflare/account-data.mjs';
+
+const sqlite=await import('node:sqlite').catch(()=>null);
+test('account data is isolated, bounded and removable', {skip:!sqlite&&'node:sqlite unavailable'}, async()=>{
+ const db=new sqlite.DatabaseSync(':memory:');
+ db.exec('PRAGMA foreign_keys=ON');
+ db.exec(readFileSync(new URL('../cloudflare/schema.sql',import.meta.url),'utf8'));
+ db.exec(readFileSync(new URL('../cloudflare/migrations/0001_account_data.sql',import.meta.url),'utf8'));
+ db.exec("INSERT INTO accounts VALUES ('a'),('b'); INSERT INTO episodes VALUES ('ep','title','tech','','',10,3,'2026-01-01','audio/ep')");
+ const d1={prepare(sql){return {bind(...args){return {async run(){return db.prepare(sql).run(...args)},async all(){return {results:db.prepare(sql).all(...args)}}}}}}};
+ await setFavorite(d1,'a','ep',true,'2026-01-01');
+ await setFavorite(d1,'a','ep',true,'2026-01-02');
+ await setFavorite(d1,'b','ep',true);
+ await setListeningPosition(d1,'a','ep',12,'2026-01-01');
+ await setListeningPosition(d1,'a','ep',30,'2026-01-02');
+ const a=await getAccountData(d1,'a'),b=await getAccountData(d1,'b');
+ assert.deepEqual(a.favorites,['ep']);
+ assert.equal(a.history.length,1);assert.equal(a.history[0].position_seconds,30);
+ assert.deepEqual(b.favorites,['ep']);assert.equal(b.history.length,0);
+ await assert.rejects(setListeningPosition(d1,'a','ep',-1),RangeError);
+ await assert.rejects(setListeningPosition(d1,'a','ep',Infinity),RangeError);
+ await assert.rejects(setFavorite(d1,'a','ep','yes'),TypeError);
+ await assert.rejects(setFavorite(d1,'a','missing',true));
+ await clearListeningHistory(d1,'a');await setFavorite(d1,'a','ep',false);
+ assert.deepEqual(await getAccountData(d1,'a'),{favorites:[],history:[]});
+ assert.deepEqual((await getAccountData(d1,'b')).favorites,['ep']);
+ db.close();
+});
