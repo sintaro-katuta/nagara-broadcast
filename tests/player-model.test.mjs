@@ -19,6 +19,9 @@ test('previous stays inside the current queue and does not wrap',()=>{
  assert.equal(previousId(['a','c'],'missing'),null);
 });
 test('initial sync uses the saved position only after duration is known',()=>{
+ assert.equal(resumePosition(undefined,120,false),null);
+ assert.equal(resumePosition(37,120,false),null);
+ assert.equal(resumePosition(37,120,true),37);
  assert.equal(resumePosition(37,NaN),null);
  assert.equal(resumePosition(37,Infinity),null);
  assert.equal(resumePosition(37,120),37);

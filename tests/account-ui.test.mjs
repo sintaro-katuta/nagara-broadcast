@@ -75,3 +75,21 @@ test('session changes invalidate stale state, and final position sends immediate
  active='c';channel.onmessage({data:'changed'});assert.equal(sessions.at(-1),null);
  await new Promise(resolve=>setTimeout(resolve,0));assert.deepEqual(sessions.at(-1).favorites,['c']);
 });
+
+test('account readiness waits for a definitive response and remains pending on failure',async()=>{
+ const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout'];
+ const elements=Object.fromEntries(names.map(name=>[name,{hidden:false,disabled:false,textContent:'',focus(){},reset(){}}]));elements['account-dialog'].querySelectorAll=()=>[];
+ globalThis.location={hash:'',pathname:'/',search:''};globalThis.history={state:null,replaceState(){}};globalThis.BroadcastChannel=undefined;
+ globalThis.document={getElementById:id=>elements[id],addEventListener(){}};
+ let respond;const pending=new Promise(resolve=>{respond=resolve});const states=[];
+ globalThis.fetch=async(path)=>path==='/api/auth/status'?Response.json({available:true}):pending;
+ const {makeAccountUI}=await import('../public/account-ui.js?test=readiness');
+ const ui=makeAccountUI({onSession:(value,ready)=>states.push({value,ready}),onNotice(){}});
+ const init=ui.init();await new Promise(resolve=>setTimeout(resolve,0));assert.deepEqual(states,[]);
+ respond(Response.json({favorites:[],history:[{episode_id:'ep',position_seconds:37}],sessionTag:'1'.repeat(64)}));await init;
+ assert.equal(states.at(-1).ready,true);assert.equal(states.at(-1).value.history[0].position_seconds,37);
+ const failed=[];globalThis.fetch=async()=>{throw new Error('offline')};
+ await makeAccountUI({onSession:(value,ready)=>failed.push({value,ready}),onNotice(){}}).init();assert.deepEqual(failed,[]);
+ const anonymous=[];globalThis.fetch=async(path)=>path==='/api/auth/status'?Response.json({available:true}):new Response(null,{status:401});
+ await makeAccountUI({onSession:(value,ready)=>anonymous.push({value,ready}),onNotice(){}}).init();assert.deepEqual(anonymous,[{value:null,ready:true}]);
+});
