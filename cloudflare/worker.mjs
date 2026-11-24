@@ -4,6 +4,7 @@ import {episodeTitle} from '../public/programs.js';
 import {accountApi} from './account-api.mjs';
 import {verifySession,revokeSession} from './sessions.mjs';
 import {makeAuthRoutes} from './auth-routes.mjs';
+import {cleanupExpiredAuth} from './auth-cleanup.mjs';
 
 const json=(value,status=200)=>Response.json(value,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 const publicEpisode=row=>({id:row.id,title:episodeTitle(row),channel:row.channel,description:row.description,source:row.source,duration:row.duration,size:row.size,date:row.date,audio:`/audio/${row.id}.mp3`,demo:false});
@@ -20,6 +21,11 @@ async function list(env){
  return results.map(publicEpisode);
 }
 export default {
+ async scheduled(controller,env){
+  if(env.AUTH_CLEANUP_ENABLED!=='true')return;
+  const removed=await cleanupExpiredAuth(env.DB,controller.scheduledTime);
+  console.log('Expired auth cleanup',JSON.stringify(removed));
+ },
  async fetch(request,env){
   const url=new URL(request.url);
   try{

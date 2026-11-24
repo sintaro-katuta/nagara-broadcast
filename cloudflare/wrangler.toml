@@ -2,6 +2,9 @@ name = "nagara-broadcast"
 main = "worker.mjs"
 compatibility_date = "2026-10-20"
 
+[triggers]
+crons = ["0 * * * *"]
+
 [assets]
 directory = "./public"
 binding = "ASSETS"
