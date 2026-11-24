@@ -48,6 +48,39 @@ test('recovery messages keep the token in the URL fragment',async()=>{
  await assert.rejects(sendRecoveryEmail({send(){}},{origin:'http://radio.example',from:'x@example.com',to:'y@example.com',token:'a'.repeat(64)}));
 });
 
+test('recovery challenges expire independently after five minutes',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{
+ const sql=new sqlite.DatabaseSync(':memory:');sql.exec('PRAGMA foreign_keys=ON');
+ for(const f of ['../cloudflare/schema.sql','../cloudflare/migrations/0001_account_data.sql','../cloudflare/migrations/0002_identity_sessions.sql','../cloudflare/migrations/0003_passkeys.sql','../cloudflare/migrations/0004_recovery_email.sql','../cloudflare/migrations/0006_recovery_tokens.sql','../cloudflare/migrations/0010_passkey_recovery_attempts.sql'])sql.exec(readFileSync(new URL(f,import.meta.url),'utf8'));
+ const db={prepare(q){return {bind(...args){return {async run(){const s=sql.prepare(q);return /RETURNING/i.test(q)?{results:s.all(...args)}:(s.run(...args),{results:[]})},async first(){return sql.prepare(q).get(...args)||null},async all(){return {results:sql.prepare(q).all(...args)}}}}}},async batch(items){sql.exec('BEGIN');try{const out=[];for(const item of items)out.push(await item.run());sql.exec('COMMIT');return out}catch(e){sql.exec('ROLLBACK');throw e}}};
+ const key=crypto.getRandomValues(new Uint8Array(32)),encKey=crypto.getRandomValues(new Uint8Array(32));sql.exec("INSERT INTO accounts VALUES ('a')");
+ sql.prepare('INSERT INTO recovery_emails VALUES (?,?,?,?)').run('a',await emailLookup('expire@example.com',key),await encryptEmail('expire@example.com','a',encKey),'2026-01-01');
+ const recovery=makeRecovery({options:async()=>({challenge:'c'.repeat(43)}),verify:async()=>({verified:true,registrationInfo:{credential:{id:'id',publicKey:new Uint8Array([1]),counter:0}}})});
+ const issued=await recovery.issue(db,'expire@example.com',key,encKey,1000),browser=await recovery.confirm(db,issued.token,1001);
+ await recovery.options(db,browser,'https://radio.example',1002);
+ assert.equal(await recovery.finish(db,browser,'https://radio.example',{},1302),null);
+ assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM passkeys').get().n,0);
+ assert.ok(await recovery.options(db,browser,'https://radio.example',1303));
+ assert.match(await recovery.finish(db,browser,'https://radio.example',{},1304),/__Host-nagara_session=/);
+ sql.close();
+});
+
+test('a pending confirmation cannot recreate authorization after another recovery succeeds',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{
+ const sql=new sqlite.DatabaseSync(':memory:');sql.exec('PRAGMA foreign_keys=ON');
+ for(const f of ['../cloudflare/schema.sql','../cloudflare/migrations/0001_account_data.sql','../cloudflare/migrations/0002_identity_sessions.sql','../cloudflare/migrations/0003_passkeys.sql','../cloudflare/migrations/0004_recovery_email.sql','../cloudflare/migrations/0006_recovery_tokens.sql','../cloudflare/migrations/0010_passkey_recovery_attempts.sql'])sql.exec(readFileSync(new URL(f,import.meta.url),'utf8'));
+ let pause=false,release,entered;const reached=new Promise(resolve=>entered=resolve),gate=new Promise(resolve=>release=resolve);
+ const db={prepare(q){return {bind(...args){return {async run(){const s=sql.prepare(q);return /RETURNING/i.test(q)?{results:s.all(...args)}:(s.run(...args),{results:[]})},async first(){return sql.prepare(q).get(...args)||null},async all(){return {results:sql.prepare(q).all(...args)}}}}}},async batch(items){if(pause){pause=false;entered();await gate;}sql.exec('BEGIN');try{const out=[];for(const item of items)out.push(await item.run());sql.exec('COMMIT');return out}catch(e){sql.exec('ROLLBACK');throw e}}};
+ const key=crypto.getRandomValues(new Uint8Array(32)),encKey=crypto.getRandomValues(new Uint8Array(32));sql.exec("INSERT INTO accounts VALUES ('a')");
+ sql.prepare('INSERT INTO recovery_emails VALUES (?,?,?,?)').run('a',await emailLookup('race@example.com',key),await encryptEmail('race@example.com','a',encKey),'2026-01-01');
+ const recovery=makeRecovery({options:async()=>({challenge:'c'.repeat(43)}),verify:async()=>({verified:true,registrationInfo:{credential:{id:'newkey',publicKey:new Uint8Array([1]),counter:0}}})});
+ const first=await recovery.issue(db,'race@example.com',key,encKey,1000),second=await recovery.issue(db,'race@example.com',key,encKey,1000);
+ const browser=await recovery.confirm(db,first.token,1001);await recovery.options(db,browser,'https://radio.example',1002);
+ pause=true;const pending=recovery.confirm(db,second.token,1003);await reached;
+ assert.match(await recovery.finish(db,browser,'https://radio.example',{},1004),/__Host-nagara_session=/);
+ release();assert.equal(await pending,null);
+ assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM passkey_recovery_attempts').get().n,0);
+ sql.close();
+});
+
 test('recovery accepts a real WebAuthn registration response',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{
  const sql=new sqlite.DatabaseSync(':memory:');sql.exec('PRAGMA foreign_keys=ON');
  for(const f of ['../cloudflare/schema.sql','../cloudflare/migrations/0001_account_data.sql','../cloudflare/migrations/0002_identity_sessions.sql','../cloudflare/migrations/0003_passkeys.sql','../cloudflare/migrations/0004_recovery_email.sql','../cloudflare/migrations/0006_recovery_tokens.sql','../cloudflare/migrations/0010_passkey_recovery_attempts.sql'])sql.exec(readFileSync(new URL(f,import.meta.url),'utf8'));

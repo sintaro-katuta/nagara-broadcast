@@ -8,7 +8,7 @@ const sqlite=await import('node:sqlite').catch(()=>null);
 
 test('email confirmation and credential verification are required before creating an account',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{
  const sql=new sqlite.DatabaseSync(':memory:');sql.exec('PRAGMA foreign_keys=ON');
- for(const f of ['../cloudflare/schema.sql','../cloudflare/migrations/0001_account_data.sql','../cloudflare/migrations/0002_identity_sessions.sql','../cloudflare/migrations/0003_passkeys.sql','../cloudflare/migrations/0004_recovery_email.sql','../cloudflare/migrations/0009_passkey_enrollments.sql'])sql.exec(readFileSync(new URL(f,import.meta.url),'utf8'));
+ for(const f of ['../cloudflare/schema.sql','../cloudflare/migrations/0001_account_data.sql','../cloudflare/migrations/0002_identity_sessions.sql','../cloudflare/migrations/0003_passkeys.sql','../cloudflare/migrations/0004_recovery_email.sql','../cloudflare/migrations/0009_passkey_enrollments.sql','../cloudflare/migrations/0011_enrollment_challenge_expiry.sql'])sql.exec(readFileSync(new URL(f,import.meta.url),'utf8'));
  const db={prepare(q){return {bind(...args){return {async run(){return sql.prepare(q).run(...args)},async first(){return sql.prepare(q).get(...args)||null}}}}},async batch(items){sql.exec('BEGIN');try{for(const item of items)await item.run();sql.exec('COMMIT')}catch(e){sql.exec('ROLLBACK');throw e}}};
  const lookupKey=crypto.getRandomValues(new Uint8Array(32)),encryptionKey=crypto.getRandomValues(new Uint8Array(32));
  const enrollment=makeEnrollment({options:async()=>({challenge:'c'.repeat(43)}),verify:async(_origin,challenge,response)=>({verified:challenge==='c'.repeat(43)&&response.valid,registrationInfo:{credential:{id:'credential',publicKey:new Uint8Array([1,2]),counter:0,transports:[]}}})});
@@ -20,7 +20,10 @@ test('email confirmation and credential verification are required before creatin
  assert.equal(await enrollment.confirm(db,token,1002),null);
  assert.equal(await enrollment.options(db,'0'.repeat(64),'https://radio.example',1002),null);
  assert.equal((await enrollment.options(db,browser,'https://radio.example',1002)).challenge,'c'.repeat(43));
- const session=await enrollment.finish(db,browser,'https://radio.example',{valid:true},1003);
+ assert.equal(await enrollment.finish(db,browser,'https://radio.example',{valid:true},1302),null);
+ assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM accounts').get().n,0);
+ assert.equal((await enrollment.options(db,browser,'https://radio.example',1303)).challenge,'c'.repeat(43));
+ const session=await enrollment.finish(db,browser,'https://radio.example',{valid:true},1304);
  assert.match(session,/__Host-nagara_session=/);
  assert.equal(await enrollment.finish(db,browser,'https://radio.example',{valid:true},1004),null);
  const row=sql.prepare('SELECT account_id,email_ciphertext FROM recovery_emails').get();
@@ -36,7 +39,7 @@ test('email confirmation and credential verification are required before creatin
 
 test('enrollment accepts a real WebAuthn registration response and saves the public key',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{
  const sql=new sqlite.DatabaseSync(':memory:');sql.exec('PRAGMA foreign_keys=ON');
- for(const f of ['../cloudflare/schema.sql','../cloudflare/migrations/0001_account_data.sql','../cloudflare/migrations/0002_identity_sessions.sql','../cloudflare/migrations/0003_passkeys.sql','../cloudflare/migrations/0004_recovery_email.sql','../cloudflare/migrations/0009_passkey_enrollments.sql'])sql.exec(readFileSync(new URL(f,import.meta.url),'utf8'));
+ for(const f of ['../cloudflare/schema.sql','../cloudflare/migrations/0001_account_data.sql','../cloudflare/migrations/0002_identity_sessions.sql','../cloudflare/migrations/0003_passkeys.sql','../cloudflare/migrations/0004_recovery_email.sql','../cloudflare/migrations/0009_passkey_enrollments.sql','../cloudflare/migrations/0011_enrollment_challenge_expiry.sql'])sql.exec(readFileSync(new URL(f,import.meta.url),'utf8'));
  const db={prepare(q){return {bind(...args){return {async run(){return sql.prepare(q).run(...args)},async first(){return sql.prepare(q).get(...args)||null}}}}},async batch(items){sql.exec('BEGIN');try{for(const item of items)await item.run();sql.exec('COMMIT')}catch(e){sql.exec('ROLLBACK');throw e}}};
  const key=crypto.getRandomValues(new Uint8Array(32)),enrollment=makeEnrollment(),origin='https://radio.example';
  const token=await enrollment.begin(db,'real@example.com',key,key,1000),browser=await enrollment.confirm(db,token,1001),options=await enrollment.options(db,browser,origin,1002);
@@ -53,7 +56,7 @@ test('enrollment accepts a real WebAuthn registration response and saves the pub
 
 test('a failed credential cannot create an account and consumes the enrollment',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{
  const sql=new sqlite.DatabaseSync(':memory:');sql.exec('PRAGMA foreign_keys=ON');
- for(const f of ['../cloudflare/schema.sql','../cloudflare/migrations/0001_account_data.sql','../cloudflare/migrations/0002_identity_sessions.sql','../cloudflare/migrations/0003_passkeys.sql','../cloudflare/migrations/0004_recovery_email.sql','../cloudflare/migrations/0009_passkey_enrollments.sql'])sql.exec(readFileSync(new URL(f,import.meta.url),'utf8'));
+ for(const f of ['../cloudflare/schema.sql','../cloudflare/migrations/0001_account_data.sql','../cloudflare/migrations/0002_identity_sessions.sql','../cloudflare/migrations/0003_passkeys.sql','../cloudflare/migrations/0004_recovery_email.sql','../cloudflare/migrations/0009_passkey_enrollments.sql','../cloudflare/migrations/0011_enrollment_challenge_expiry.sql'])sql.exec(readFileSync(new URL(f,import.meta.url),'utf8'));
  const db={prepare(q){return {bind(...args){return {async run(){return sql.prepare(q).run(...args)},async first(){return sql.prepare(q).get(...args)||null}}}}}};
  const key=crypto.getRandomValues(new Uint8Array(32));
  const enrollment=makeEnrollment({options:async()=>({challenge:'c'.repeat(43)}),verify:async()=>({verified:false})});
