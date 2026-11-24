@@ -33,13 +33,13 @@ export function makeEnrollment({options=registrationOptions,verify=verifyRegistr
    const row=await db.prepare('SELECT account_id FROM passkey_enrollments WHERE browser_token_hash=? AND email_token_hash IS NULL AND expires_at>?').bind(key,now).first();
    if(!row)return null;
    const value=await options(origin,row.account_id,[]);
-   const updated=await db.prepare('UPDATE passkey_enrollments SET challenge=? WHERE browser_token_hash=? AND expires_at>? RETURNING account_id').bind(value.challenge,key,now).first();
+   const updated=await db.prepare('UPDATE passkey_enrollments SET challenge=?,challenge_expires_at=MIN(expires_at,?) WHERE browser_token_hash=? AND expires_at>? RETURNING account_id').bind(value.challenge,now+300,key,now).first();
    return updated?value:null;
   },
   async finish(db,browserToken,origin,response,now=clock()){
    if(!valid(browserToken))return null;
    const key=await digest(browserToken);
-   const row=await db.prepare('DELETE FROM passkey_enrollments WHERE browser_token_hash=? AND challenge IS NOT NULL AND expires_at>? RETURNING account_id,email_lookup,email_ciphertext,challenge').bind(key,now).first();
+   const row=await db.prepare('DELETE FROM passkey_enrollments WHERE browser_token_hash=? AND challenge IS NOT NULL AND expires_at>? AND challenge_expires_at>? RETURNING account_id,email_lookup,email_ciphertext,challenge').bind(key,now,now).first();
    if(!row)return null;
    let result;try{result=await verify(origin,row.challenge,response);}catch{return null;}
    const credential=result.verified&&result.registrationInfo?.credential;

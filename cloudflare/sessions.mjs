@@ -5,11 +5,16 @@ const digest=async token=>hex(new Uint8Array(await crypto.subtle.digest('SHA-256
 const cookie=token=>`${name}=${token}; Path=/; Secure; HttpOnly; SameSite=Lax`;
 
 // Only random 256-bit session tokens are hashed with SHA-256; passwords are never stored.
-export async function createSession(db,accountId,now=Date.now()) {
+export async function prepareSession(now=Date.now()) {
  const token=hex(crypto.getRandomValues(new Uint8Array(32)));
  const expires=Math.floor(now/1000)+30*24*60*60;
- await db.prepare('INSERT INTO account_sessions (token_hash,account_id,expires_at) VALUES (?,?,?)').bind(await digest(token),accountId,expires).run();
- return `${cookie(token)}; Max-Age=${30*24*60*60}`;
+ return {tokenHash:await digest(token),expiresAt:expires,cookie:`${cookie(token)}; Max-Age=${30*24*60*60}`};
+}
+
+export async function createSession(db,accountId,now=Date.now()) {
+ const session=await prepareSession(now);
+ await db.prepare('INSERT INTO account_sessions (token_hash,account_id,expires_at) VALUES (?,?,?)').bind(session.tokenHash,accountId,session.expiresAt).run();
+ return session.cookie;
 }
 
 function tokenFrom(request) {
