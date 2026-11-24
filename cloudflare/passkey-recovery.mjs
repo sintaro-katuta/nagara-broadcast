@@ -1,7 +1,7 @@
 import {emailLookup,decryptEmail} from './recovery-crypto.mjs';
 import {registrationOptions,verifyRegistration} from './passkeys.mjs';
 import {issueRecoveryToken} from './recovery-tokens.mjs';
-import {createSession} from './sessions.mjs';
+import {prepareSession} from './sessions.mjs';
 
 const enc=new TextEncoder();
 const hex=bytes=>Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
@@ -56,17 +56,19 @@ export function makeRecovery({options=registrationOptions,verify=verifyRegistrat
    if(!credential||typeof credential.id!=='string'||!/^[A-Za-z0-9_-]{1,2048}$/.test(credential.id)||!(credential.publicKey instanceof Uint8Array)||!Number.isSafeInteger(credential.counter)||credential.counter<0){await invalidate();return null;}
    const claim=await db.prepare('UPDATE passkey_recovery_attempts SET challenge=NULL,challenge_expires_at=NULL WHERE browser_token_hash=? AND challenge=? AND expires_at>? AND challenge_expires_at>? RETURNING account_id').bind(browserHash,row.challenge,now,now).first();
    if(!claim)return null;
+   const session=await prepareSession(now*1000);
    let changes;
    try{
     changes=await db.batch([
      db.prepare('INSERT INTO passkeys(credential_id,account_id,public_key,sign_count,transports,created_at) VALUES (CASE WHEN NOT EXISTS (SELECT 1 FROM account_admins WHERE account_id=?) AND (SELECT COUNT(*) FROM passkeys WHERE account_id=?)<20 AND EXISTS (SELECT 1 FROM passkey_recovery_attempts WHERE browser_token_hash=? AND account_id=? AND challenge IS NULL AND expires_at>?) THEN ? ELSE NULL END,?,?,?,?,?) RETURNING credential_id').bind(row.account_id,row.account_id,browserHash,row.account_id,now,credential.id,row.account_id,credential.publicKey,credential.counter,JSON.stringify(credential.transports||[]),new Date(now*1000).toISOString()),
      db.prepare('DELETE FROM account_sessions WHERE account_id=?').bind(row.account_id),
      db.prepare('DELETE FROM recovery_tokens WHERE account_id=? AND purpose=?').bind(row.account_id,'recover_account'),
-     db.prepare('DELETE FROM passkey_recovery_attempts WHERE account_id=?').bind(row.account_id)
+     db.prepare('DELETE FROM passkey_recovery_attempts WHERE account_id=?').bind(row.account_id),
+     db.prepare('INSERT INTO account_sessions(token_hash,account_id,expires_at) VALUES (?,?,?)').bind(session.tokenHash,row.account_id,session.expiresAt)
     ]);
    }catch{return null;}
    if(!changes[0]?.results?.length)return null;
-   return createSession(db,row.account_id,now*1000);
+   return session.cookie;
   }
  };
 }

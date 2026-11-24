@@ -5,6 +5,7 @@ import {emailLookup,encryptEmail} from '../cloudflare/recovery-crypto.mjs';
 import {makeRecovery} from '../cloudflare/passkey-recovery.mjs';
 import {sendRecoveryEmail} from '../cloudflare/recovery-email.mjs';
 import {createHash,generateKeyPairSync} from 'node:crypto';
+import {verifySession} from '../cloudflare/sessions.mjs';
 const sqlite=await import('node:sqlite').catch(()=>null);
 
 test('email recovery requires verification and refuses administrators',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{
@@ -78,6 +79,28 @@ test('a pending confirmation cannot recreate authorization after another recover
  assert.match(await recovery.finish(db,browser,'https://radio.example',{},1004),/__Host-nagara_session=/);
  release();assert.equal(await pending,null);
  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM passkey_recovery_attempts').get().n,0);
+ sql.close();
+});
+
+test('a delayed recovery response cannot recreate a session after a newer recovery',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{
+ const sql=new sqlite.DatabaseSync(':memory:');sql.exec('PRAGMA foreign_keys=ON');
+ for(const f of ['../cloudflare/schema.sql','../cloudflare/migrations/0001_account_data.sql','../cloudflare/migrations/0002_identity_sessions.sql','../cloudflare/migrations/0003_passkeys.sql','../cloudflare/migrations/0004_recovery_email.sql','../cloudflare/migrations/0006_recovery_tokens.sql','../cloudflare/migrations/0010_passkey_recovery_attempts.sql'])sql.exec(readFileSync(new URL(f,import.meta.url),'utf8'));
+ let pause=false,release,entered;const reached=new Promise(resolve=>entered=resolve),gate=new Promise(resolve=>release=resolve);
+ const db={prepare(q){return {bind(...args){return {async run(){const s=sql.prepare(q);return /RETURNING/i.test(q)?{results:s.all(...args)}:(s.run(...args),{results:[]})},async first(){return sql.prepare(q).get(...args)||null},async all(){return {results:sql.prepare(q).all(...args)}}}}}},async batch(items){sql.exec('BEGIN');let out;try{out=[];for(const item of items)out.push(await item.run());sql.exec('COMMIT')}catch(e){sql.exec('ROLLBACK');throw e}if(pause){pause=false;entered();await gate;}return out}};
+ const key=crypto.getRandomValues(new Uint8Array(32)),encKey=crypto.getRandomValues(new Uint8Array(32));sql.exec("INSERT INTO accounts VALUES ('a')");
+ sql.prepare('INSERT INTO recovery_emails VALUES (?,?,?,?)').run('a',await emailLookup('race@example.com',key),await encryptEmail('race@example.com','a',encKey),'2026-01-01');
+ const recovery=makeRecovery({options:async()=>({challenge:'c'.repeat(43)}),verify:async(_origin,_challenge,response)=>({verified:true,registrationInfo:{credential:{id:response.id,publicKey:new Uint8Array([1]),counter:0}}})});
+ const first=await recovery.issue(db,'race@example.com',key,encKey,1000),browser=await recovery.confirm(db,first.token,1001);
+ await recovery.options(db,browser,'https://radio.example',1002);pause=true;
+ const pending=recovery.finish(db,browser,'https://radio.example',{id:'first'},1003);await reached;
+ const second=await recovery.issue(db,'race@example.com',key,encKey,1004),browser2=await recovery.confirm(db,second.token,1005);
+ await recovery.options(db,browser2,'https://radio.example',1006);
+ const fresh=await recovery.finish(db,browser2,'https://radio.example',{id:'second'},1007);
+ release();const stale=await pending;
+ const request=c=>new Request('https://radio.example/api/account',{headers:{Cookie:c.split(';')[0]}});
+ assert.equal(await verifySession(request(stale),db,1008000),null);
+ assert.deepEqual(await verifySession(request(fresh),db,1008000),{accountId:'a',admin:false});
+ assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM account_sessions').get().n,1);
  sql.close();
 });
 
