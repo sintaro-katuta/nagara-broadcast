@@ -1,0 +1,20 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {makePasskeyRegistration} from '../cloudflare/passkey-registration.mjs';
+const sqlite=await import('node:sqlite').catch(()=>null);
+test('adding a passkey requires its originating account and a one-use verified challenge',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{
+ const sql=new sqlite.DatabaseSync(':memory:');sql.exec('PRAGMA foreign_keys=ON');
+ for(const f of ['../cloudflare/schema.sql','../cloudflare/migrations/0001_account_data.sql','../cloudflare/migrations/0003_passkeys.sql','../cloudflare/migrations/0008_passkey_registration_attempts.sql'])sql.exec(readFileSync(new URL(f,import.meta.url),'utf8'));
+ sql.exec("INSERT INTO accounts VALUES ('a'),('b')");
+ const db={prepare(q){return {bind(...args){return {async run(){return sql.prepare(q).run(...args)},async first(){return sql.prepare(q).get(...args)||null},async all(){return {results:sql.prepare(q).all(...args)}}}}}}};
+ const env={DB:db,AUTH_ORIGIN:'https://radio.example'},register=makePasskeyRegistration({session:async req=>req.headers.get('x-test-user')?{accountId:req.headers.get('x-test-user')}:null,options:async()=>({challenge:'a'.repeat(43)}),verify:async(_origin,expected,response)=>({verified:expected==='a'.repeat(43)&&response.valid===true,registrationInfo:{credential:{id:'Y3JlZA',publicKey:new Uint8Array([1,2]),counter:0,transports:[]}}})});
+ const req=(path,user,body,cookie)=>new Request(env.AUTH_ORIGIN+path,{method:'POST',headers:{Origin:env.AUTH_ORIGIN,'Content-Type':'application/json',...(user?{'x-test-user':user}:{}),...(cookie?{Cookie:cookie}:{})},body:JSON.stringify(body)});
+ assert.equal((await register(req('/api/auth/passkey/register/options',null,{}),env)).status,401);
+ const start=await register(req('/api/auth/passkey/register/options','a',{}),env),cookie=start.headers.get('Set-Cookie').split(';')[0];
+ assert.equal((await register(req('/api/auth/passkey/register/verify','b',{valid:true},cookie),env)).status,401);
+ const finish=await register(req('/api/auth/passkey/register/verify','a',{valid:true},cookie),env);
+ assert.equal(finish.status,200);assert.equal(sql.prepare('SELECT account_id FROM passkeys').get().account_id,'a');
+ assert.equal((await register(req('/api/auth/passkey/register/verify','a',{valid:true},cookie),env)).status,401);
+ sql.close();
+});
