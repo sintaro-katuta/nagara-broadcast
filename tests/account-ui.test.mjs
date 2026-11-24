@@ -93,3 +93,36 @@ test('account readiness waits for a definitive response and remains pending on f
  const anonymous=[];globalThis.fetch=async(path)=>path==='/api/auth/status'?Response.json({available:true}):new Response(null,{status:401});
  await makeAccountUI({onSession:(value,ready)=>anonymous.push({value,ready}),onNotice(){}}).init();assert.deepEqual(anonymous,[{value:null,ready:true}]);
 });
+
+test('initialization retries after a transient failure when the user opens the account screen',async()=>{
+ const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout'];
+ const elements=Object.fromEntries(names.map(name=>[name,{hidden:false,disabled:false,textContent:'',focus(){},reset(){}}]));
+ const dialog=elements['account-dialog'];dialog.querySelectorAll=()=>[];dialog.showModal=function(){this.open=true};
+ globalThis.location={hash:'',pathname:'/',search:''};globalThis.history={state:null,replaceState(){}};globalThis.BroadcastChannel=undefined;globalThis.window={};globalThis.document={getElementById:id=>elements[id],addEventListener(){}};
+ let offline=true;const states=[];
+ globalThis.fetch=async(path)=>{if(offline)throw new Error('offline');return path==='/api/auth/status'?Response.json({available:true}):Response.json({favorites:[],history:[{episode_id:'ep',position_seconds:37}],sessionTag:'1'.repeat(64)});};
+ const {makeAccountUI}=await import('../public/account-ui.js?test=retry');const ui=makeAccountUI({onSession:(value,ready)=>states.push({value,ready}),onNotice(){}});
+ await ui.init();assert.deepEqual(states,[]);offline=false;await ui.open();
+ assert.equal(dialog.open,true);assert.equal(ui.isSignedIn(),true);assert.equal(states.at(-1).value.history[0].position_seconds,37);assert.equal(states.at(-1).ready,true);
+});
+
+test('an account request failure retries on network recovery',async()=>{
+ const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout'];
+ const elements=Object.fromEntries(names.map(name=>[name,{hidden:false,disabled:false,textContent:'',focus(){},reset(){}}]));elements['account-dialog'].querySelectorAll=()=>[];
+ const events={};globalThis.location={hash:'',pathname:'/',search:''};globalThis.history={state:null,replaceState(){}};globalThis.BroadcastChannel=undefined;globalThis.window={addEventListener:(name,fn)=>{events[name]=fn}};globalThis.document={getElementById:id=>elements[id],addEventListener(){}};
+ let failing=true;const states=[];globalThis.fetch=async(path)=>path==='/api/auth/status'?Response.json({available:true}):failing?new Response(null,{status:503}):Response.json({favorites:[],history:[],sessionTag:'1'.repeat(64)});
+ const {makeAccountUI}=await import('../public/account-ui.js?test=online-retry');const ui=makeAccountUI({onSession:(value,ready)=>states.push({value,ready}),onNotice(){}});
+ await ui.init();assert.deepEqual(states,[]);failing=false;events.online();await new Promise(resolve=>setTimeout(resolve,0));assert.equal(ui.isSignedIn(),true);assert.equal(states.at(-1).ready,true);
+});
+
+test('revalidation discards an older account response after a favorite write',async()=>{
+ const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout'];
+ const elements=Object.fromEntries(names.map(name=>[name,{hidden:false,disabled:false,textContent:'',focus(){},reset(){}}]));elements['account-dialog'].querySelectorAll=()=>[];
+ globalThis.location={hash:'',pathname:'/',search:''};globalThis.history={state:null,replaceState(){}};globalThis.BroadcastChannel=undefined;globalThis.window={};globalThis.document={getElementById:id=>elements[id],addEventListener(){}};
+ let accountCalls=0,oldResponse;const old=new Promise(resolve=>{oldResponse=resolve});const states=[];
+ globalThis.fetch=async(path)=>{if(path==='/api/auth/status')return Response.json({available:true});if(path==='/api/account/favorite')return new Response(null,{status:200});if(path==='/api/account'){accountCalls++;if(accountCalls===2)return old;return Response.json({favorites:accountCalls===1?[]:['ep'],history:[],sessionTag:'1'.repeat(64)});}throw new Error('unexpected path');};
+ const {makeAccountUI}=await import('../public/account-ui.js?test=revalidate');const ui=makeAccountUI({onSession:value=>states.push(value),onNotice(){}});await ui.init();
+ const write=ui.setFavorite('ep',true);ui.revalidate();await write;ui.revalidate();
+ await new Promise(resolve=>setTimeout(resolve,0));oldResponse(Response.json({favorites:[],history:[],sessionTag:'1'.repeat(64)}));await new Promise(resolve=>setTimeout(resolve,0));
+ assert.deepEqual(states.at(-1).favorites,['ep']);
+});
