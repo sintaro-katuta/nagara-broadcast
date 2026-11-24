@@ -1,5 +1,5 @@
 import {programs,episodeProgram,episodeTitle} from '/programs.js';
-import {buildQueue,nextIds,previousId,resumePosition} from '/player-model.js';
+import {buildQueue,nextIds,previousId,resumePosition,createPositionWriter} from '/player-model.js';
 import {programArt,personArt,programDescriptions} from '/design-data.js';
 import {makeAccountUI} from '/account-ui.js';
 const $=id=>document.getElementById(id);
@@ -59,14 +59,11 @@ const publishedDate=value=>new Date(value).toLocaleDateString('ja-JP',{year:'num
 const bytes=n=>n>=1e9?`${(n/1e9).toFixed(2)} GB`:n>=1e6?`${(n/1e6).toFixed(1)} MB`:`${(n/1000).toFixed(0)} KB`;
 const castMarkup=(cast)=>cast.split('・').map(name=>{const p=personArt(name.trim());return `<span class="cast-person">${p?`<img src="${p.src}" class="${p.position}" alt="">`:''}<span>${esc(name.trim())}</span></span>`}).join('');
 const publicPreview=document.documentElement.classList.contains('cloud-public');if(publicPreview){saved=[];history=[];positions={};}
-let sessionGeneration=0,lastCloudPosition=0,positionSequence=0,accountReady=!publicPreview;const positionWrites=new Map(),favoriteWrites=new Set(),positionWriter=publicPreview?crypto.randomUUID():'';
+let sessionGeneration=0,lastCloudPosition=0,accountReady=!publicPreview;const favoriteWrites=new Set();
 const account=makeAccountUI({onSession(data,ready){sessionGeneration++;accountReady=ready;saved=Array.isArray(data?.favorites)?data.favorites:[];const rows=Array.isArray(data?.history)?data.history:[];history=rows.map(row=>row.episode_id);positions=Object.fromEntries(rows.map(row=>[row.episode_id,row.position_seconds]));if(ready)restoreResume();render();},onNotice:message=>toast(message)});
+const positionWriter=publicPreview?createPositionWriter(account,crypto.randomUUID(),()=>toast('再生履歴を同期できませんでした。')):null;
 function syncPosition(id,seconds,final=false){
- if(!publicPreview||!account.isSignedIn())return;
- const generation=sessionGeneration,sequence=++positionSequence,previous=positionWrites.get(id)||Promise.resolve();
- if(final){account.setPosition(id,seconds,positionWriter,sequence,true).catch(()=>{});return;}
- const next=previous.catch(()=>{}).then(()=>{if(generation!==sessionGeneration||!account.isSignedIn())return;return account.setPosition(id,seconds,positionWriter,sequence);}).catch(()=>toast('再生履歴を同期できませんでした。'));
- positionWrites.set(id,next);next.finally(()=>{if(positionWrites.get(id)===next)positionWrites.delete(id);});
+ if(positionWriter)positionWriter(id,seconds,final);
 }
 function toast(message){$('toast').textContent=message;$('toast').classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('visible'),3400);}
 $('date-label').textContent=new Intl.DateTimeFormat('ja-JP',{month:'long',day:'numeric',weekday:'long'}).format(new Date());

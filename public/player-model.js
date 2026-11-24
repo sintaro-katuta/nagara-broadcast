@@ -15,3 +15,10 @@ export function resumePosition(saved,duration,accountReady=true){
  const position=Number(saved||0);
  return Number.isFinite(position)&&position>0&&position<duration-2?position:0;
 }
+export function createPositionWriter(account,writerId,onError){
+ let sequence=0;
+ return (id,seconds,final=false)=>{
+  if(!account.isSignedIn())return;
+  return account.setPosition(id,seconds,writerId,++sequence,final).catch(error=>{if(!final)onError(error);});
+ };
+}
