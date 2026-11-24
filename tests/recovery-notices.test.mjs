@@ -49,8 +49,9 @@ test('notification trigger is disabled by default and rejects missing configurat
  await assert.rejects(worker.scheduled({cron:'*/5 * * * *'},{AUTH_NOTICES_ENABLED:'true'}),/configuration unavailable/);
 });
 
-test('enabled notification trigger sends queued messages',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{
+test('enabled notification trigger sends queued messages',{skip:!sqlite&&'node:sqlite unavailable'},async(t)=>{
  const {sql,key,db}=await setup();const messages=[];
- await worker.scheduled({cron:'*/5 * * * *'},{AUTH_NOTICES_ENABLED:'true',AUTH_ENCRYPTION_KEY:Buffer.from(key).toString('hex'),AUTH_EMAIL_FROM:'sender@example.com',EMAIL:{async send(message){messages.push(message)}},DB:db});
+ t.mock.method(globalThis,'fetch',async(_url,options)=>{messages.push(JSON.parse(options.body));return Response.json({id:'test'});});
+ await worker.scheduled({cron:'*/5 * * * *'},{AUTH_NOTICES_ENABLED:'true',AUTH_ENCRYPTION_KEY:Buffer.from(key).toString('hex'),AUTH_EMAIL_FROM:'sender@example.com',RESEND_API_KEY:'re_test_key_12345',DB:db});
  assert.equal(messages.length,1);assert.equal(messages[0].to,'person@example.com');assert.equal(sql.prepare('SELECT COUNT(*) n FROM recovery_notice_outbox').get().n,0);sql.close();
 });

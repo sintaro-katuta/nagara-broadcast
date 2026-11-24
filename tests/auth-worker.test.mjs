@@ -19,7 +19,7 @@ function assertion(options,id,privateKey,origin){
  return {id:id.toString('base64url'),rawId:id.toString('base64url'),type:'public-key',clientExtensionResults:{},response:{clientDataJSON:client.toString('base64url'),authenticatorData:auth.toString('base64url'),signature:signature.toString('base64url'),userHandle:null}};
 }
 
-test('Worker registration, login, data access and recovery use actual WebAuthn verification',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{
+test('Worker registration, login, data access and recovery use actual WebAuthn verification',{skip:!sqlite&&'node:sqlite unavailable'},async(t)=>{
  const sql=new sqlite.DatabaseSync(':memory:');sql.exec('PRAGMA foreign_keys=ON');
  const migrations=['0001_account_data.sql','0002_identity_sessions.sql','0003_passkeys.sql','0004_recovery_email.sql','0005_passkey_login_attempts.sql','0006_recovery_tokens.sql','0007_auth_rate_limits.sql','0008_passkey_registration_attempts.sql','0009_passkey_enrollments.sql','0010_passkey_recovery_attempts.sql','0011_enrollment_challenge_expiry.sql','0012_account_auth_generations.sql','0013_position_write_cursors.sql','0015_recovery_notice_outbox.sql'];
  for(const f of ['../cloudflare/schema.sql',...migrations.map(x=>'../cloudflare/migrations/'+x)])sql.exec(readFileSync(new URL(f,import.meta.url),'utf8'));
@@ -35,7 +35,8 @@ test('Worker registration, login, data access and recovery use actual WebAuthn v
   }},
   async batch(items){sql.exec('BEGIN');try{const out=[];for(const item of items)out.push(await item.run());sql.exec('COMMIT');return out}catch(e){sql.exec('ROLLBACK');throw e}}
  };
- const messages=[],origin='https://radio.example',env={DB:db,AUTH_ENABLED:'true',PASSKEY_API_ENABLED:'true',AUTH_NOTICES_ENABLED:'true',AUTH_ORIGIN:origin,AUTH_RATE_KEY:'01'.repeat(32),AUTH_LOOKUP_KEY:'02'.repeat(32),AUTH_ENCRYPTION_KEY:'03'.repeat(32),AUTH_EMAIL_FROM:'sender@example.com',EMAIL:{async send(m){messages.push(m)}}};
+ const messages=[],origin='https://radio.example',env={DB:db,AUTH_ENABLED:'true',PASSKEY_API_ENABLED:'true',AUTH_NOTICES_ENABLED:'true',AUTH_ORIGIN:origin,AUTH_RATE_KEY:'01'.repeat(32),AUTH_LOOKUP_KEY:'02'.repeat(32),AUTH_ENCRYPTION_KEY:'03'.repeat(32),AUTH_EMAIL_FROM:'sender@example.com',RESEND_API_KEY:'re_test_key_12345'};
+ t.mock.method(globalThis,'fetch',async(url,options)=>{assert.equal(url,'https://api.resend.com/emails');messages.push(JSON.parse(options.body));return Response.json({id:'test-message'});});
  const post=(path,data,cookie)=>worker.fetch(new Request(origin+path,{method:'POST',headers:{Origin:origin,'CF-Connecting-IP':'192.0.2.1','Content-Type':'application/json',...(cookie?{Cookie:cookie}:{})},body:JSON.stringify(data)}),env);
  const get=(path,cookie)=>worker.fetch(new Request(origin+path,{headers:{Cookie:cookie}}),env);
  const put=(path,data,cookie,tag)=>worker.fetch(new Request(origin+path,{method:'PUT',headers:{Origin:origin,Cookie:cookie,'Content-Type':'application/json','X-Account-Session':tag},body:JSON.stringify(data)}),env);
