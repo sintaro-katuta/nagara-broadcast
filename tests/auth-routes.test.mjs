@@ -15,7 +15,7 @@ test('auth routes enforce origin, limit email requests and keep tokens in cookie
  const enrollment={async begin(_db,email){calls.push(['begin',email]);return token},async confirm(_db,value){return value===token?'b'.repeat(64):null},async options(_db,browser){return browser==='b'.repeat(64)?{challenge:'challenge'}:null},async finish(_db,browser,_origin,data){return browser==='b'.repeat(64)&&data.ok?session:null}};
  const recovery={async issue(){return null}};
  const routes=makeAuthRoutes({enrollment,recovery,sendEnroll:async(_binding,details)=>calls.push(['email',details.to]),sendRecovery:async()=>{throw new Error('should not send')}});
- const origin='https://radio.example',env={DB:db,AUTH_ORIGIN:origin,AUTH_RATE_KEY:'01'.repeat(32),AUTH_LOOKUP_KEY:'02'.repeat(32),AUTH_ENCRYPTION_KEY:'03'.repeat(32),AUTH_EMAIL_FROM:'sender@example.com',EMAIL:{}};
+ const origin='https://radio.example',env={DB:db,AUTH_ORIGIN:origin,AUTH_NOTICES_ENABLED:'true',AUTH_RATE_KEY:'01'.repeat(32),AUTH_LOOKUP_KEY:'02'.repeat(32),AUTH_ENCRYPTION_KEY:'03'.repeat(32),AUTH_EMAIL_FROM:'sender@example.com',EMAIL:{async send(){}}};
  const request=(path,data,headers={})=>new Request(origin+path,{method:'POST',headers:{Origin:origin,'CF-Connecting-IP':'192.0.2.1','Content-Type':'application/json',...headers},body:JSON.stringify(data)});
  assert.equal((await routes(request('/api/auth/enroll/start',{email:'u@example.com'},{Origin:'https://evil.example'}),env)).status,403);
  for(let i=0;i<4;i++)assert.equal((await routes(request('/api/auth/enroll/start',{email:'u@example.com'}),env)).status,200);
@@ -36,21 +36,22 @@ test('public Worker does not expose passkey routes without the release flags',as
  assert.equal(response.status,404);
  const status=await worker.fetch(new Request('https://radio.example/api/auth/status'),{AUTH_ENABLED:'false'});
  assert.deepEqual(await status.json(),{available:false});
- const ready={AUTH_ENABLED:'true',PASSKEY_API_ENABLED:'true',AUTH_ORIGIN:'https://radio.example',AUTH_RATE_KEY:'01'.repeat(32),AUTH_LOOKUP_KEY:'02'.repeat(32),AUTH_ENCRYPTION_KEY:'03'.repeat(32),AUTH_EMAIL_FROM:'sender@example.com',EMAIL:{}};
+ const ready={AUTH_ENABLED:'true',PASSKEY_API_ENABLED:'true',AUTH_NOTICES_ENABLED:'true',AUTH_ORIGIN:'https://radio.example',AUTH_RATE_KEY:'01'.repeat(32),AUTH_LOOKUP_KEY:'02'.repeat(32),AUTH_ENCRYPTION_KEY:'03'.repeat(32),AUTH_EMAIL_FROM:'sender@example.com',EMAIL:{async send(){}}};
  assert.deepEqual(await (await worker.fetch(new Request('https://radio.example/api/auth/status'),ready)).json(),{available:true});
  assert.deepEqual(await (await worker.fetch(new Request('https://radio.example/api/auth/status'),{...ready,AUTH_LOOKUP_KEY:ready.AUTH_RATE_KEY})).json(),{available:false});
+ assert.deepEqual(await (await worker.fetch(new Request('https://radio.example/api/auth/status'),{...ready,AUTH_NOTICES_ENABLED:'false'})).json(),{available:false});
 });
 
 test('registration, login and recovery integrate without sending real email',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{
  const sql=new sqlite.DatabaseSync(':memory:');sql.exec('PRAGMA foreign_keys=ON');
  const files=['../cloudflare/schema.sql',...Array.from({length:12},(_,i)=>['0001_account_data.sql','0002_identity_sessions.sql','0003_passkeys.sql','0004_recovery_email.sql','0005_passkey_login_attempts.sql','0006_recovery_tokens.sql','0007_auth_rate_limits.sql','0008_passkey_registration_attempts.sql','0009_passkey_enrollments.sql','0010_passkey_recovery_attempts.sql','0011_enrollment_challenge_expiry.sql','0012_account_auth_generations.sql'][i]).map(f=>'../cloudflare/migrations/'+f)];
- for(const file of files)sql.exec(readFileSync(new URL(file,import.meta.url),'utf8'));
+ for(const file of [...files,'../cloudflare/migrations/0015_recovery_notice_outbox.sql'])sql.exec(readFileSync(new URL(file,import.meta.url),'utf8'));
  const db={prepare(q){return {bind(...args){return {async run(){const s=sql.prepare(q);return /RETURNING/i.test(q)?{results:s.all(...args)}:(s.run(...args),{results:[]})},async first(){return sql.prepare(q).get(...args)||null},async all(){return {results:sql.prepare(q).all(...args)}}}}}},async batch(items){sql.exec('BEGIN');try{const out=[];for(const item of items)out.push(await item.run());sql.exec('COMMIT');return out}catch(e){sql.exec('ROLLBACK');throw e}}};
  const options=async()=>({challenge:'c'.repeat(43)}),verify=async(_origin,_challenge,response)=>({verified:response.valid===true,registrationInfo:{credential:{id:response.id,publicKey:new Uint8Array([1,2]),counter:0,transports:[]}}});
  const enrollment=makeEnrollment({options,verify}),recovery=makeRecovery({options,verify});
  const login=makePasskeyLogin({options,verify:async()=>({verified:true,authenticationInfo:{newCounter:0}})});
  const sent=[],routes=makeAuthRoutes({enrollment,recovery,login,sendEnroll:async(_b,details)=>sent.push(details),sendRecovery:async(_b,details)=>sent.push(details)});
- const origin='https://radio.example',env={DB:db,AUTH_ORIGIN:origin,AUTH_RATE_KEY:'01'.repeat(32),AUTH_LOOKUP_KEY:'02'.repeat(32),AUTH_ENCRYPTION_KEY:'03'.repeat(32),AUTH_EMAIL_FROM:'sender@example.com',EMAIL:{}};
+ const origin='https://radio.example',env={DB:db,AUTH_ORIGIN:origin,AUTH_NOTICES_ENABLED:'true',AUTH_RATE_KEY:'01'.repeat(32),AUTH_LOOKUP_KEY:'02'.repeat(32),AUTH_ENCRYPTION_KEY:'03'.repeat(32),AUTH_EMAIL_FROM:'sender@example.com',EMAIL:{async send(){}}};
  const request=(path,data,cookie)=>new Request(origin+path,{method:'POST',headers:{Origin:origin,'CF-Connecting-IP':'192.0.2.1','Content-Type':'application/json',...(cookie?{Cookie:cookie}:{})},body:JSON.stringify(data)});
  const getCookie=(response,name)=>response.headers.getSetCookie().find(s=>s.startsWith(name+'=')).split(';')[0];
  assert.equal((await routes(request('/api/auth/enroll/start',{email:'u@example.com'}),env)).status,200);
@@ -64,6 +65,7 @@ test('registration, login and recovery integrate without sending real email',{sk
  assert.equal((await routes(request('/api/auth/recovery/start',{email:'u@example.com'}),env)).status,200);
  const recoveryConfirm=await routes(request('/api/auth/recovery/confirm',{token:sent[1].token}),env),recoveryCookie=getCookie(recoveryConfirm,'__Host-nagara_recovery');
  assert.equal((await routes(request('/api/auth/recovery/options',{},recoveryCookie),env)).status,200);
+ assert.equal((await routes(request('/api/auth/recovery/finish',{id:'second',valid:true},recoveryCookie),{...env,AUTH_NOTICES_ENABLED:'false'})).status,503);
  const recovered=await routes(request('/api/auth/recovery/finish',{id:'second',valid:true},recoveryCookie),env);
  assert.equal(recovered.status,200);
  assert.equal(await verifySession(request('/api/account',{},oldSession),db),null);

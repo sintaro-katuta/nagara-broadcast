@@ -5,6 +5,7 @@ import {accountApi} from './account-api.mjs';
 import {verifySession,revokeSession} from './sessions.mjs';
 import {makeAuthRoutes} from './auth-routes.mjs';
 import {cleanupExpiredAuth} from './auth-cleanup.mjs';
+import {deliverRecoveryNotices} from './recovery-notices.mjs';
 
 const json=(value,status=200)=>Response.json(value,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 const publicEpisode=row=>({id:row.id,title:episodeTitle(row),channel:row.channel,description:row.description,source:row.source,duration:row.duration,size:row.size,date:row.date,audio:`/audio/${row.id}.mp3`,demo:false});
@@ -22,15 +23,21 @@ async function list(env){
 }
 export default {
  async scheduled(controller,env){
-  if(env.AUTH_CLEANUP_ENABLED!=='true')return;
-  const removed=await cleanupExpiredAuth(env.DB,controller.scheduledTime);
-  console.log('Expired auth cleanup',JSON.stringify(removed));
+  if(controller.cron==='0 * * * *'&&env.AUTH_CLEANUP_ENABLED==='true'){
+   const removed=await cleanupExpiredAuth(env.DB,controller.scheduledTime);
+   console.log('Expired auth cleanup',JSON.stringify(removed));
+  }
+  if(controller.cron==='*/5 * * * *'&&env.AUTH_NOTICES_ENABLED==='true'){
+   const value=env.AUTH_ENCRYPTION_KEY;if(typeof value!=='string'||!/^[a-f0-9]{64}$/i.test(value))throw new Error('Notification configuration unavailable');
+   const result=await deliverRecoveryNotices(env.DB,env.EMAIL,env.AUTH_EMAIL_FROM,Uint8Array.from(value.match(/../g),x=>parseInt(x,16)));
+   console.log('Recovery notices',JSON.stringify(result));
+  }
  },
  async fetch(request,env){
   const url=new URL(request.url);
   try{
    if(request.method==='GET'&&url.pathname==='/api/auth/status'){
-    const configured=env.AUTH_ENABLED==='true'&&env.PASSKEY_API_ENABLED==='true'&&env.AUTH_ORIGIN===url.origin&&!!env.EMAIL&&typeof env.AUTH_EMAIL_FROM==='string'&&['AUTH_RATE_KEY','AUTH_LOOKUP_KEY','AUTH_ENCRYPTION_KEY'].every(k=>typeof env[k]==='string'&&/^[a-f0-9]{64}$/i.test(env[k]))&&new Set(['AUTH_RATE_KEY','AUTH_LOOKUP_KEY','AUTH_ENCRYPTION_KEY'].map(k=>env[k].toLowerCase())).size===3;
+    const configured=env.AUTH_ENABLED==='true'&&env.PASSKEY_API_ENABLED==='true'&&env.AUTH_NOTICES_ENABLED==='true'&&env.AUTH_ORIGIN===url.origin&&typeof env.EMAIL?.send==='function'&&typeof env.AUTH_EMAIL_FROM==='string'&&['AUTH_RATE_KEY','AUTH_LOOKUP_KEY','AUTH_ENCRYPTION_KEY'].every(k=>typeof env[k]==='string'&&/^[a-f0-9]{64}$/i.test(env[k]))&&new Set(['AUTH_RATE_KEY','AUTH_LOOKUP_KEY','AUTH_ENCRYPTION_KEY'].map(k=>env[k].toLowerCase())).size===3;
     return json({available:configured});
    }
    if(env.AUTH_ENABLED==='true'){
