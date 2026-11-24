@@ -100,7 +100,7 @@ test('a delayed recovery response cannot recreate a session after a newer recove
  release();const stale=await pending;
  const request=c=>new Request('https://radio.example/api/account',{headers:{Cookie:c.split(';')[0]}});
  assert.equal(await verifySession(request(stale),db,1008000),null);
- assert.deepEqual(await verifySession(request(fresh),db,1008000),{accountId:'a',admin:false});
+ const freshIdentity=await verifySession(request(fresh),db,1008000);assert.equal(freshIdentity.accountId,'a');assert.equal(freshIdentity.admin,false);assert.match(freshIdentity.sessionTag,/^[a-f0-9]{64}$/);
  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM account_sessions').get().n,1);
  sql.close();
 });

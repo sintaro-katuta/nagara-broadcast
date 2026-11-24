@@ -13,7 +13,7 @@ test('sessions use opaque hashed tokens, expire and revoke', {skip:!sqlite&&'nod
  const pair=issued.split(';')[0],token=pair.split('=')[1];
  assert.notEqual(sql.prepare('SELECT token_hash FROM account_sessions').get().token_hash,token);
  const req=new Request('https://example.test/api/account',{headers:{Cookie:pair}});
- assert.deepEqual(await verifySession(req,db,1000000),{accountId:'a',admin:true});
+ const verified=await verifySession(req,db,1000000);assert.equal(verified.accountId,'a');assert.equal(verified.admin,true);assert.match(verified.sessionTag,/^[a-f0-9]{64}$/);assert.notEqual(verified.sessionTag,token);assert.notEqual(verified.sessionTag,sql.prepare('SELECT token_hash FROM account_sessions').get().token_hash);
  assert.equal(await verifySession(req,db,1000000+31*86400000),null);
  assert.equal(await verifySession(new Request(req,{headers:{Cookie:pair+'; '+pair}}),db,1000000),null);
  assert.match(await revokeSession(req,db),/Max-Age=0/);

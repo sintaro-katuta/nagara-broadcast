@@ -33,6 +33,9 @@ export default {
     }
     if(url.pathname==='/api/auth/logout'&&request.method==='POST'){
      if(request.headers.get('Origin')!==url.origin)return json({error:'リクエストを確認できません。'},403);
+     const identity=await verifySession(request,env.DB);
+     if(!identity)return json({error:'ログインが必要です。'},401);
+     if(request.headers.get('X-Account-Session')!==identity.sessionTag)return json({error:'アカウントが変更されました。'},409);
      const cookie=await revokeSession(request,env.DB);
      return new Response(JSON.stringify({ok:true}),{headers:{'Content-Type':'application/json','Cache-Control':'no-store','Set-Cookie':cookie}});
     }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {buildQueue,nextIds,previousId} from '../public/player-model.js';
+import {buildQueue,nextIds,previousId,resumePosition} from '../public/player-model.js';
 test('a filtered playlist continues only within that list',()=>{
  const all=[{id:'a'},{id:'b'},{id:'c'}];
  const queue=buildQueue([all[0],all[2]],all,'a');
@@ -17,4 +17,10 @@ test('previous stays inside the current queue and does not wrap',()=>{
  assert.equal(previousId(['a','c'],'c'),'a');
  assert.equal(previousId(['a','c'],'a'),null);
  assert.equal(previousId(['a','c'],'missing'),null);
+});
+test('initial sync uses the saved position only after duration is known',()=>{
+ assert.equal(resumePosition(37,NaN),null);
+ assert.equal(resumePosition(37,Infinity),null);
+ assert.equal(resumePosition(37,120),37);
+ assert.equal(resumePosition(119,120),0);
 });

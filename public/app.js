@@ -1,5 +1,5 @@
 import {programs,episodeProgram,episodeTitle} from '/programs.js';
-import {buildQueue,nextIds,previousId} from '/player-model.js';
+import {buildQueue,nextIds,previousId,resumePosition} from '/player-model.js';
 import {programArt,personArt,programDescriptions} from '/design-data.js';
 import {makeAccountUI} from '/account-ui.js';
 const $=id=>document.getElementById(id);
@@ -59,12 +59,13 @@ const publishedDate=value=>new Date(value).toLocaleDateString('ja-JP',{year:'num
 const bytes=n=>n>=1e9?`${(n/1e9).toFixed(2)} GB`:n>=1e6?`${(n/1e6).toFixed(1)} MB`:`${(n/1000).toFixed(0)} KB`;
 const castMarkup=(cast)=>cast.split('・').map(name=>{const p=personArt(name.trim());return `<span class="cast-person">${p?`<img src="${p.src}" class="${p.position}" alt="">`:''}<span>${esc(name.trim())}</span></span>`}).join('');
 const publicPreview=document.documentElement.classList.contains('cloud-public');if(publicPreview){saved=[];history=[];positions={};}
-let sessionGeneration=0,lastCloudPosition=0;const positionWrites=new Map(),favoriteWrites=new Set();
+let sessionGeneration=0,lastCloudPosition=0,positionSequence=0;const positionWrites=new Map(),favoriteWrites=new Set(),positionWriter=publicPreview?crypto.randomUUID():'';
 const account=makeAccountUI({onSession(data){sessionGeneration++;saved=Array.isArray(data?.favorites)?data.favorites:[];const rows=Array.isArray(data?.history)?data.history:[];history=rows.map(row=>row.episode_id);positions=Object.fromEntries(rows.map(row=>[row.episode_id,row.position_seconds]));render();},onNotice:message=>toast(message)});
-function syncPosition(id,seconds){
+function syncPosition(id,seconds,final=false){
  if(!publicPreview||!account.isSignedIn())return;
- const generation=sessionGeneration,previous=positionWrites.get(id)||Promise.resolve();
- const next=previous.catch(()=>{}).then(()=>{if(generation!==sessionGeneration||!account.isSignedIn())return;return account.setPosition(id,seconds);}).catch(()=>toast('再生履歴を同期できませんでした。'));
+ const generation=sessionGeneration,sequence=++positionSequence,previous=positionWrites.get(id)||Promise.resolve();
+ if(final){account.setPosition(id,seconds,positionWriter,sequence,true).catch(()=>{});return;}
+ const next=previous.catch(()=>{}).then(()=>{if(generation!==sessionGeneration||!account.isSignedIn())return;return account.setPosition(id,seconds,positionWriter,sequence);}).catch(()=>toast('再生履歴を同期できませんでした。'));
  positionWrites.set(id,next);next.finally(()=>{if(positionWrites.get(id)===next)positionWrites.delete(id);});
 }
 function toast(message){$('toast').textContent=message;$('toast').classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('visible'),3400);}
@@ -173,13 +174,15 @@ async function play(id,build=true){
  try{await audio.play();}catch(e){if(e.name!=='AbortError')toast('音声を再生できませんでした。MP3を確認してください。');}
 }
 function next(){if(!current)return toast('まずエピソードを選んでください。');const id=nextIds(queue,current.id)[0];if(id)play(id,false);else toast('最後のエピソードです。');}
-audio.addEventListener('loadedmetadata',()=>{audio.playbackRate=Number($('speed').value);if(current){const p=Number(positions[current.id]||0);if(Number.isFinite(p)&&p>0&&p<audio.duration-2)audio.currentTime=p;}switching=false;$('total-time').textContent=time(audio.duration);updatePlayer();});
-audio.addEventListener('play',()=>{if(current&&(!publicPreview||account.isSignedIn())){history=[current.id,...history.filter(id=>id!==current.id)].slice(0,200);if(publicPreview)syncPosition(current.id,audio.currentTime);else write('yr:history',history);}render();});
+function restoreResume(){if(!switching||!current||audio.readyState<1)return;const resume=resumePosition(positions[current.id],audio.duration);if(resume===null)return;if(resume>0)audio.currentTime=resume;switching=false;if(publicPreview&&!audio.paused)syncPosition(current.id,resume);}
+audio.addEventListener('loadedmetadata',()=>{audio.playbackRate=Number($('speed').value);restoreResume();$('total-time').textContent=time(audio.duration);updatePlayer();});
+audio.addEventListener('durationchange',restoreResume);
+audio.addEventListener('play',()=>{if(current&&(!publicPreview||account.isSignedIn())){history=[current.id,...history.filter(id=>id!==current.id)].slice(0,200);if(publicPreview){if(!switching)syncPosition(current.id,audio.currentTime);}else write('yr:history',history);}render();});
 audio.addEventListener('pause',()=>{persistPosition();render();});
 audio.addEventListener('error',()=>{toast('音声を読み込めませんでした。ファイルを確認してください。');updatePlayer();});
 audio.addEventListener('timeupdate',()=>{if(captionsEnabled)renderCaptions();$('current-time').textContent=time(audio.currentTime);$('total-time').textContent=time(audio.duration);$('seek').value=audio.duration?audio.currentTime/audio.duration*100:0;$('expanded-seek').value=$('seek').value;$('expanded-current').textContent=time(audio.currentTime);$('expanded-total').textContent=time(audio.duration);if(publicPreview){if(Date.now()-lastCloudPosition>30000){persistPosition();lastCloudPosition=Date.now();}}else if(Date.now()-lastPositionWrite>4000){persistPosition();lastPositionWrite=Date.now();}});
 audio.addEventListener('ended',()=>{if(current){positions[current.id]=0;if(publicPreview)syncPosition(current.id,0);else write('yr:positions',positions);}render();if($('auto-next').checked)next();});
-window.addEventListener('pagehide',persistPosition);
+window.addEventListener('pagehide',()=>{if(publicPreview){if(!switching&&current&&Number.isFinite(audio.currentTime))syncPosition(current.id,audio.ended?0:audio.currentTime,true);}else persistPosition();});
 $('hero-play').onclick=()=>{if(featured)play(featured.id);};$('feature-save').onclick=()=>{if(featured)save(featured.id);};
 $('start-listening').onclick=()=>{if(featured)play(featured.id);};
 function closeMenu(){document.querySelector('.site-header').classList.remove('menu-open');$('menu-toggle').setAttribute('aria-expanded','false');$('menu-toggle').setAttribute('aria-label','メニューを開く');}

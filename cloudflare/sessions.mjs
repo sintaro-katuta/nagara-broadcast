@@ -26,8 +26,9 @@ function tokenFrom(request) {
 
 export async function verifySession(request,db,now=Date.now()) {
  const token=tokenFrom(request);if(!token)return null;
- const row=await db.prepare('SELECT s.account_id, a.account_id AS admin_id FROM account_sessions s LEFT JOIN account_admins a ON a.account_id=s.account_id WHERE s.token_hash=? AND s.expires_at>?').bind(await digest(token),Math.floor(now/1000)).first();
- return row?{accountId:row.account_id,admin:!!row.admin_id}:null;
+ const tokenHash=await digest(token);
+ const row=await db.prepare('SELECT s.account_id, a.account_id AS admin_id FROM account_sessions s LEFT JOIN account_admins a ON a.account_id=s.account_id WHERE s.token_hash=? AND s.expires_at>?').bind(tokenHash,Math.floor(now/1000)).first();
+ return row?{accountId:row.account_id,admin:!!row.admin_id,sessionTag:await digest('account-state:'+tokenHash)}:null;
 }
 
 export async function revokeSession(request,db) {
