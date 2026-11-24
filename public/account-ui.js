@@ -20,14 +20,14 @@ function webauthn(){
 }
 
 export function makeAccountUI({onSession,onNotice}){
- let enabled=false,signedIn=false,sessionTag=null,mode='enroll',link=initialLink,busy=false,stage='anonymous',stateVersion=0,initializing=null;
+ let enabled=false,signedIn=false,sessionTag=null,refreshTag=null,mode='enroll',link=initialLink,busy=false,stage='anonymous',stateVersion=0,initializing=null;
  const channel=typeof BroadcastChannel==='function'?new BroadcastChannel('nagara-account-session'):null;
  const dialog=$('account-dialog');
  const message=text=>{$('account-message').textContent=text;};
  function show(kind){stage=kind;$('account-anonymous').hidden=kind!=='anonymous';$('account-confirm').hidden=kind!=='confirm';$('account-create').hidden=kind!=='create';$('account-signed-in').hidden=kind!=='signed-in';}
  function setBusy(value){busy=value;dialog.querySelectorAll('button,input').forEach(element=>element.disabled=value);}
  async function open(){if(!enabled){await init();if(!enabled){onNotice('ログイン機能を確認できませんでした。接続を確認して、もう一度お試しください。');return;}}if(stage!=='confirm'&&stage!=='create'){show(signedIn?'signed-in':'anonymous');message(signedIn?'ログインしています。':'ログインすると、あとで聴くと再生履歴を別の端末でも使えます。');}if(!dialog.open)dialog.showModal();}
- function invalidate(ready=false){stateVersion++;signedIn=false;sessionTag=null;onSession(null,ready);}
+ function invalidate(ready=false,positionTag=null){stateVersion++;signedIn=false;sessionTag=null;refreshTag=positionTag;onSession(null,ready);}
  function notifyTabs(){if(channel)channel.postMessage('changed');else try{localStorage.setItem('nagara:session-change',crypto.randomUUID());}catch{}}
  async function refresh(){
   const version=stateVersion;
@@ -37,9 +37,9 @@ export function makeAccountUI({onSession,onNotice}){
   if(!response.ok)throw new Error('アカウント情報を読み込めませんでした。');
   const value=await response.json();if(version!==stateVersion)return;
   if(typeof value.sessionTag!=='string'||!/^[a-f0-9]{64}$/.test(value.sessionTag))throw new Error('アカウント情報を確認できませんでした。');
-  sessionTag=value.sessionTag;signedIn=true;onSession(value,true);
+  refreshTag=null;sessionTag=value.sessionTag;signedIn=true;onSession(value,true);
  }
- function changedElsewhere(){if(!enabled){init();return;}invalidate();refresh().catch(()=>onNotice('アカウント情報を確認できませんでした。'));}
+ function changedElsewhere(){if(!enabled){init();return;}invalidate(false,sessionTag||refreshTag);refresh().catch(()=>onNotice('アカウント情報を確認できませんでした。'));}
  if(channel)channel.onmessage=event=>{if(event.data==='changed')changedElsewhere();};
  if(!channel&&typeof window.addEventListener==='function')window.addEventListener('storage',event=>{if(event.key==='nagara:session-change')changedElsewhere();});
  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')changedElsewhere();});
@@ -59,18 +59,20 @@ export function makeAccountUI({onSession,onNotice}){
  $('account-confirm-button').onclick=()=>action(async()=>{if(!link)throw new Error('リンクを確認できません。メールから開き直してください。');await api(`/api/auth/${link.kind}/confirm`,{token:link.token});mode=link.kind;link=null;show('create');message('この端末で使うパスキーを登録してください。');});
  $('account-create-button').onclick=()=>action(async()=>{const client=await webauthn(),options=await api(`/api/auth/${mode}/options`,{}),response=await client.startRegistration({optionsJSON:options});await api(`/api/auth/${mode}/finish`,response);invalidate();notifyTabs();await refresh();show('signed-in');dialog.close();onNotice('パスキーを登録しました。');});
  $('account-logout').onclick=()=>action(async()=>{const tag=sessionTag;const response=await fetch('/api/auth/logout',{method:'POST',headers:{'X-Account-Session':tag||''},credentials:'same-origin'});if(response.status===409||response.status===401){changedElsewhere();throw new Error('アカウントが変更されました。');}if(!response.ok)throw new Error('ログアウトできませんでした。');invalidate(true);notifyTabs();show('anonymous');dialog.close();onNotice('ログアウトしました。');});
- async function write(path,body,keepalive=false){
-  const tag=sessionTag;if(!signedIn||!tag)throw new Error('ログインが必要です。');
+ async function write(path,body,keepalive=false,allowRefresh=false){
+  const tag=sessionTag||(allowRefresh?refreshTag:null),duringRefresh=!sessionTag&&!!tag;if(!tag)throw new Error('ログインが必要です。');
   const response=await fetch(path,{method:'PUT',headers:{'Content-Type':'application/json','X-Account-Session':tag},body:JSON.stringify(body),credentials:'same-origin',keepalive});
-  if((response.status===401||response.status===409)&&sessionTag===tag)changedElsewhere();
+  if((response.status===401||response.status===409)&&(sessionTag===tag||refreshTag===tag)){invalidate();refresh().catch(()=>onNotice('アカウント情報を確認できませんでした。'));}
   if(!response.ok)throw new Error(response.status===409?'アカウントが変更されました。':'保存できませんでした。接続を確認してください。');
+  if(duringRefresh&&!keepalive&&(sessionTag===tag||refreshTag===tag))changedElsewhere();
  }
  return {
   init,
   open,
   revalidate:changedElsewhere,
   isSignedIn:()=>signedIn,
+  canWritePosition:()=>!!(sessionTag||refreshTag),
   async setFavorite(id,enabled){return write('/api/account/favorite',{episodeId:id,enabled});},
-  async setPosition(id,positionSeconds,writerId,sequence,keepalive=false){return write('/api/account/history',{episodeId:id,positionSeconds,writerId,sequence},keepalive);}
+  async setPosition(id,positionSeconds,writerId,sequence,keepalive=false){return write('/api/account/history',{episodeId:id,positionSeconds,writerId,sequence},keepalive,true);}
  };
 }

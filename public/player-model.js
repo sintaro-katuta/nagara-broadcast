@@ -18,7 +18,7 @@ export function resumePosition(saved,duration,accountReady=true){
 export function createPositionWriter(account,writerId,onError){
  let sequence=0;
  return (id,seconds,final=false)=>{
-  if(!account.isSignedIn())return;
+  if(!account.canWritePosition())return;
   return account.setPosition(id,seconds,writerId,++sequence,final).catch(error=>{if(!final)onError(error);});
  };
 }

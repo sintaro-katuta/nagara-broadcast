@@ -29,7 +29,7 @@ test('initial sync uses the saved position only after duration is known',()=>{
 });
 test('position writes start immediately even while an earlier request is pending',async()=>{
  const requests=[];let resolveFirst,signedIn=true;const first=new Promise(resolve=>{resolveFirst=resolve});
- const account={isSignedIn:()=>signedIn,setPosition(...args){requests.push(args);return requests.length===1?first:Promise.resolve();}};
+ const account={canWritePosition:()=>signedIn,setPosition(...args){requests.push(args);return requests.length===1?first:Promise.resolve();}};
  const send=createPositionWriter(account,'writer-1234567890',()=>assert.fail('unexpected failure'));
  const pending=send('ep',30);const pause=send('ep',45);assert.deepEqual(requests.map(row=>[row[1],row[3],row[4]]),[[30,1,false],[45,2,false]]);
  signedIn=false;send('ep',50);signedIn=true;const final=send('ep',60,true);assert.deepEqual(requests[2],['ep',60,'writer-1234567890',3,true]);
