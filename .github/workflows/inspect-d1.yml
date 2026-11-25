@@ -15,25 +15,8 @@ jobs:
           node-version: '24'
       - name: Install dependencies
         run: npm ci
-      - name: Prepare disposable background test
+      - name: Verify D1 authentication with background tasks and mocked email
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_D1_WRITE_TOKEN: ${{ secrets.CLOUDFLARE_D1_WRITE_TOKEN }}
-        run: node scripts/setup-background-auth.mjs
-      - name: Deploy disposable test Worker
-        env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: npx --yes wrangler@4.168.0 deploy --config /tmp/nagara-background-config.json
-      - name: Verify response and background completion
-        env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_D1_WRITE_TOKEN: ${{ secrets.CLOUDFLARE_D1_WRITE_TOKEN }}
-        run: node scripts/check-background-auth.mjs
-      - name: Remove disposable Worker and database
-        if: always()
-        env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_D1_WRITE_TOKEN: ${{ secrets.CLOUDFLARE_D1_WRITE_TOKEN }}
-        run: node scripts/remove-background-auth.mjs
+        run: node scripts/d1-auth-experiment.mjs
