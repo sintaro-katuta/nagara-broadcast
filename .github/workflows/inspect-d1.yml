@@ -30,4 +30,4 @@ jobs:
       - name: Check staging email connection without sending a message
         env:
           NAGARA_STAGE_GATE: ${{ secrets.NAGARA_STAGE_GATE }}
-        run: node scripts/test-stage-diagnostic.mjs
+        run: sleep 15 && node scripts/test-stage-diagnostic.mjs
