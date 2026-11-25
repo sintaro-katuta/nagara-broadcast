@@ -1,0 +1,13 @@
+import {writeFile} from 'node:fs/promises';
+import {previewConfig} from './auth-preview-config.mjs';
+const account=process.env.CLOUDFLARE_ACCOUNT_ID,token=process.env.CLOUDFLARE_API_TOKEN;
+if(!/^[a-f0-9]{32}$/i.test(account||'')||!token)throw new Error('Cloudflare credentials unavailable');
+const url=`https://api.cloudflare.com/client/v4/accounts/${account}/workers/scripts/nagara-auth-staging/settings`;
+const response=await fetch(url,{headers:{Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(10000)});
+const data=await response.json();if(!response.ok||!data.success)throw new Error('Cannot inspect staging settings');
+const bindings=data.result.bindings||[];
+const entry=name=>bindings.find(binding=>binding.name===name);
+if((entry('DB')?.database_id||entry('DB')?.id)!=='5de2882e-e9f5-45be-bf33-81eaab1c4c90'||entry('PREVIEW_ONLY')?.text!=='true'||!entry('PREVIEW_ACCESS_TOKEN')||!entry('RESEND_API_KEY'))throw new Error('Unexpected staging bindings; refusing deploy');
+const config=previewConfig({databaseId:'5de2882e-e9f5-45be-bf33-81eaab1c4c90',origin:'https://nagara-auth-staging.sintaro-katuta.workers.dev',expiresAt:entry('PREVIEW_EXPIRES_AT')?.text});
+await writeFile('/tmp/nagara-auth-staging.json',JSON.stringify(config),{mode:0o600});
+console.log('Existing isolated staging settings verified');
