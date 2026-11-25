@@ -13,8 +13,11 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
-      - name: Inspect required secret names
+      - name: Install approved authentication secrets
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: node scripts/inspect-worker-secrets.mjs
+          AUTH_RATE_KEY: ${{ secrets.AUTH_RATE_KEY }}
+          AUTH_LOOKUP_KEY: ${{ secrets.AUTH_LOOKUP_KEY }}
+          AUTH_ENCRYPTION_KEY: ${{ secrets.AUTH_ENCRYPTION_KEY }}
+        run: node scripts/install-auth-secrets.mjs
