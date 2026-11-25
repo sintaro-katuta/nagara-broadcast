@@ -8,7 +8,7 @@ export function makeResendEmail(apiKey){
  return {async send(message,options={}){
   const headers={'Authorization':`Bearer ${apiKey}`,'Content-Type':'application/json'};
   if(options.idempotencyKey)headers['Idempotency-Key']=options.idempotencyKey;
-  const response=await fetch('https://api.resend.com/emails',{method:'POST',headers,body:JSON.stringify(message),signal:AbortSignal.timeout(10000),redirect:'error'});
+  const response=await fetch('https://api.resend.com/emails',{method:'POST',headers,body:JSON.stringify(message),signal:AbortSignal.timeout(10000),redirect:'manual'});
   if(!response.ok){
    let code='';if(response.status===409){try{code=(await response.json())?.name||'';}catch{}}
    const raw=response.headers.get('Retry-After')||'',date=Date.parse(raw);
@@ -23,7 +23,7 @@ export function makeResendEmail(apiKey){
 export async function getResendUsage(apiKey){
  if(typeof apiKey!=='string'||!/^re_[A-Za-z0-9_-]{10,250}$/.test(apiKey))return null;
  try{
-  const response=await fetch('https://api.resend.com/usage',{headers:{Authorization:`Bearer ${apiKey}`},signal:AbortSignal.timeout(5000),redirect:'error'});
+  const response=await fetch('https://api.resend.com/usage',{headers:{Authorization:`Bearer ${apiKey}`},signal:AbortSignal.timeout(5000),redirect:'manual'});
   if(!response.ok)return null;
   const data=await response.json();
   const read=window=>{
