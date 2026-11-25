@@ -23,7 +23,7 @@ async function body(request){
 // Not routed to production until the feature flag and release prerequisites
 // (including notifications, cleanup and real-service tests) are complete.
 export function makeAuthRoutes({login=makePasskeyLogin(),enrollment=makeEnrollment(),recovery=makeRecovery(),sendEnroll=sendEnrollmentEmail,sendRecovery=sendRecoveryEmail}={}){
- return async function authRoutes(request,env){
+ return async function authRoutes(request,env,ctx){
   const url=new URL(request.url),path=url.pathname;if(!paths.has(path))return null;
   if(request.method!=='POST')return json({error:'許可されていない操作です。'},405);
   let origin;try{origin=new URL(env.AUTH_ORIGIN);if(origin.protocol!=='https:'||origin.origin!==env.AUTH_ORIGIN||origin.username||origin.password)throw new Error();}catch{return json({error:'認証は準備中です。'},503);}
@@ -42,7 +42,7 @@ export function makeAuthRoutes({login=makePasskeyLogin(),enrollment=makeEnrollme
     try{email=normalizeEmail(data.email);lookup=key(env.AUTH_LOOKUP_KEY);encryption=key(env.AUTH_ENCRYPTION_KEY);if(env.AUTH_LOOKUP_KEY.toLowerCase()===env.AUTH_ENCRYPTION_KEY.toLowerCase()||env.AUTH_LOOKUP_KEY.toLowerCase()===env.AUTH_RATE_KEY.toLowerCase()||env.AUTH_ENCRYPTION_KEY.toLowerCase()===env.AUTH_RATE_KEY.toLowerCase()||!env.EMAIL||!env.AUTH_EMAIL_FROM)throw new Error();}
     catch{return json({error:'入力内容または設定を確認してください。'},400);}
     const addressKey=await rateLimitKey(rateKey,'destination',email),addressLimit=await consumeRateLimit(env.DB,addressKey,3,3600);
-    if(addressLimit.allowed){
+    const deliver=async()=>{if(addressLimit.allowed){
      if(type==='enroll'){
       const token=await service.begin(env.DB,email,lookup,encryption);
       try{await sendEnroll(env.EMAIL,{origin:origin.origin,from:env.AUTH_EMAIL_FROM,to:email,token});}catch{console.error('Enrollment email delivery failed');}
@@ -50,7 +50,11 @@ export function makeAuthRoutes({login=makePasskeyLogin(),enrollment=makeEnrollme
       const result=await service.issue(env.DB,email,lookup,encryption);
       if(result)try{await sendRecovery(env.EMAIL,{origin:origin.origin,from:env.AUTH_EMAIL_FROM,to:result.to,token:result.token});}catch{console.error('Recovery email delivery failed');}
      }
-    }
+    }};
+    // Account lookup and delivery must not determine when the public response
+    // is returned. The Worker retains the task after the response is sent.
+    const task=deliver().catch(()=>console.error('Authentication email preparation failed'));
+    if(typeof ctx?.waitUntil==='function')ctx.waitUntil(task);else await task;
     return json({ok:true});
    }
    const name=names[type];
