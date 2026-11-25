@@ -1,6 +1,19 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 
+test('recovery explains an already registered passkey and permits retry',async()=>{
+ const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout'];
+ const elements=Object.fromEntries(names.map(name=>[name,{hidden:false,disabled:false,textContent:'',focus(){},reset(){}}]));
+ const dialog=elements['account-dialog'];dialog.open=false;dialog.showModal=function(){this.open=true};dialog.close=function(){this.open=false};dialog.querySelectorAll=()=>Object.values(elements);
+ globalThis.location={hash:'#recover-account='+'a'.repeat(64),pathname:'/',search:''};globalThis.history={state:null,replaceState(){}};globalThis.BroadcastChannel=undefined;
+ let attempts=0,signed=false;globalThis.window={SimpleWebAuthnBrowser:{async startRegistration(){if(++attempts===1)throw Object.assign(new Error('The authenticator was previously registered'),{name:'InvalidStateError',code:'ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED'});return {id:'new-key'};}}};
+ globalThis.document={getElementById:id=>elements[id],addEventListener(){},createElement:()=>({}),head:{append(script){queueMicrotask(()=>script.onload())}}};
+ let finishes=0;globalThis.fetch=async path=>{if(path==='/api/auth/status')return Response.json({available:true});if(path==='/api/account')return signed?Response.json({favorites:[],history:[],sessionTag:'1'.repeat(64)}):new Response(null,{status:401});if(path==='/api/auth/recovery/confirm')return Response.json({ok:true});if(path==='/api/auth/recovery/options')return Response.json({challenge:'test'});if(path==='/api/auth/recovery/finish'){finishes++;signed=true;return Response.json({ok:true});}throw new Error('unexpected path '+path);};
+ const {makeAccountUI}=await import('../public/account-ui.js?test=recovery-duplicate');const ui=makeAccountUI({onSession(){},onNotice(){}});await ui.init();await elements['account-confirm-button'].onclick();await elements['account-create-button'].onclick();
+ assert.match(elements['account-message'].textContent,/登録済み.*別のパスキーの保存先/);assert.equal(finishes,0);assert.equal(elements['account-create'].hidden,false);
+ await elements['account-create-button'].onclick();assert.equal(finishes,1);assert.equal(ui.isSignedIn(),true);
+});
+
 test('email link is removed from history and consumed only after user confirmation',async()=>{
  const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout'];
  const elements=Object.fromEntries(names.map(name=>[name,{hidden:false,disabled:false,textContent:'',value:'',focus(){},reset(){this.value=''}}]));
