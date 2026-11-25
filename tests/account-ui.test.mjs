@@ -208,3 +208,15 @@ test('admin can queue blocked notifications and receives a clear result',async()
  await elements['account-admin-retry'].onclick();assert.equal(request.method,'POST');assert.equal(request.headers['X-Account-Session'],'a'.repeat(64));
  assert.equal(elements['account-admin-retry'].hidden,true);assert.match(elements['account-admin-retry-result'].textContent,/2件を再送待ち/);
 });
+
+test('account deletion requires confirmation and passkey verification',async()=>{
+ const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout','account-delete'];
+ const elements=Object.fromEntries(names.map(name=>[name,{hidden:true,disabled:false,textContent:'',focus(){},reset(){}}]));const dialog=elements['account-dialog'];dialog.querySelectorAll=()=>[];dialog.close=()=>{};
+ globalThis.location={hash:'',pathname:'/',search:''};globalThis.history={state:null,replaceState(){}};globalThis.BroadcastChannel=undefined;
+ let confirmed=false;globalThis.window={confirm:()=>confirmed,SimpleWebAuthnBrowser:{startAuthentication:async()=>({id:'credential'})}};
+ globalThis.document={getElementById:id=>elements[id],addEventListener(){},createElement:()=>({}),head:{append(script){queueMicrotask(()=>script.onload())}}};
+ const calls=[],notices=[];globalThis.fetch=async(path,options={})=>{calls.push({path,options});if(path==='/api/auth/status')return Response.json({available:true});if(path==='/api/account')return Response.json({favorites:[],history:[],sessionTag:'a'.repeat(64)});if(path==='/api/account/delete/options')return Response.json({challenge:'test'});if(path==='/api/account/delete/finish')return Response.json({ok:true});throw new Error('unexpected path');};
+ const {makeAccountUI}=await import('../public/account-ui.js?test=account-delete');const ui=makeAccountUI({onSession(){},onNotice:value=>notices.push(value)});await ui.init();
+ await elements['account-delete'].onclick();assert.equal(calls.some(x=>x.path.includes('/delete/')),false);
+ confirmed=true;await elements['account-delete'].onclick();assert.equal(calls.find(x=>x.path.endsWith('/finish')).options.headers['X-Account-Session'],'a'.repeat(64));assert.equal(ui.isSignedIn(),false);assert.match(notices.at(-1),/削除しました/);
+});
