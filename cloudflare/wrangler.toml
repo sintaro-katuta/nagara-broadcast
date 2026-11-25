@@ -1,6 +1,14 @@
 name = "nagara-broadcast"
 main = "worker.mjs"
 compatibility_date = "2026-10-20"
+keep_vars = true
+
+[vars]
+AUTH_ORIGIN = "https://nagara-broadcast.sintaro-katuta.com"
+AUTH_EMAIL_FROM = "no-reply@mail.nagara-broadcast.sintaro-katuta.com"
+AUTH_ENABLED = "false"
+PASSKEY_API_ENABLED = "false"
+AUTH_NOTICES_ENABLED = "false"
 
 [triggers]
 crons = ["0 * * * *", "*/5 * * * *"]

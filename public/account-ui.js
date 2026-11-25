@@ -4,6 +4,7 @@ const cleanFragment=()=>{
  const kind=params.has('confirm-email')?'enroll':params.has('recover-account')?'recovery':null;
  const token=kind?params.get(kind==='enroll'?'confirm-email':'recover-account'):null;
  if(kind)history.replaceState(history.state,'',location.pathname+location.search);
+ else if(params.has('preview-access')){params.delete('preview-access');const remaining=params.toString();history.replaceState(history.state,'',location.pathname+location.search+(remaining?'#'+remaining:''));}
  return kind&&/^[a-f0-9]{64}$/.test(token||'')?{kind,token}:null;
 };
 const initialLink=cleanFragment();
