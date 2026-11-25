@@ -63,6 +63,9 @@ export function makeAuthRoutes({login=makePasskeyLogin(),enrollment=makeEnrollme
     const result=await service.options(env.DB,token,origin.origin);return result?json(result):json({error:'操作を確認できません。'},400,cookie(name,'',0));
    }
    if(operation==='finish'){
+    if(type==='recovery'){
+     try{if(env.AUTH_NOTICES_ENABLED!=='true'||typeof env.EMAIL?.send!=='function')throw new Error();normalizeEmail(env.AUTH_EMAIL_FROM);key(env.AUTH_ENCRYPTION_KEY);}catch{return json({error:'復旧機能は準備中です。'},503);}
+    }
     const session=await service.finish(env.DB,token,origin.origin,data);if(!session)return json({error:'登録できませんでした。'},400,cookie(name,'',0));
     const headers=new Headers({'Content-Type':'application/json','Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff'});
     headers.append('Set-Cookie',cookie(name,'',0));headers.append('Set-Cookie',session);

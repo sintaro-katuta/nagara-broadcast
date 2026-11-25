@@ -44,12 +44,12 @@ test('cleanup removes expired authorization data in bounded batches and preserve
 });
 
 test('scheduled cleanup is disabled by default and reports database failures',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{
- await worker.scheduled({scheduledTime:1700000000000},{});
- await worker.scheduled({scheduledTime:1700000000000},{AUTH_CLEANUP_ENABLED:'false'});
+ await worker.scheduled({scheduledTime:1700000000000,cron:'0 * * * *'},{});
+ await worker.scheduled({scheduledTime:1700000000000,cron:'0 * * * *'},{AUTH_CLEANUP_ENABLED:'false'});
  const {sql,d1}=database();insert(sql,'account_sessions','expired',1699999999);
- await worker.scheduled({scheduledTime:1700000000000},{AUTH_CLEANUP_ENABLED:'true',DB:d1});
+ await worker.scheduled({scheduledTime:1700000000000,cron:'0 * * * *'},{AUTH_CLEANUP_ENABLED:'true',DB:d1});
  assert.equal(sql.prepare('SELECT COUNT(*) n FROM account_sessions').get().n,0);
- await assert.rejects(worker.scheduled({scheduledTime:1700000000000},{AUTH_CLEANUP_ENABLED:'true',DB:{prepare(){throw new Error('DB unavailable')}}}),/DB unavailable/);sql.close();
+ await assert.rejects(worker.scheduled({scheduledTime:1700000000000,cron:'0 * * * *'},{AUTH_CLEANUP_ENABLED:'true',DB:{prepare(){throw new Error('DB unavailable')}}}),/DB unavailable/);sql.close();
 });
 
 test('failed batch rolls back all cleanup deletions',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{

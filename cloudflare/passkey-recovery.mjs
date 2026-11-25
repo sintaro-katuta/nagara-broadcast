@@ -65,7 +65,8 @@ export function makeRecovery({options=registrationOptions,verify=verifyRegistrat
      db.prepare('DELETE FROM account_sessions WHERE account_id=?').bind(row.account_id),
      db.prepare('DELETE FROM recovery_tokens WHERE account_id=? AND purpose=?').bind(row.account_id,'recover_account'),
      db.prepare('DELETE FROM passkey_recovery_attempts WHERE account_id=?').bind(row.account_id),
-     db.prepare('INSERT INTO account_sessions(token_hash,account_id,expires_at) VALUES (?,?,?)').bind(session.tokenHash,row.account_id,session.expiresAt)
+     db.prepare('INSERT INTO account_sessions(token_hash,account_id,expires_at) VALUES (?,?,?)').bind(session.tokenHash,row.account_id,session.expiresAt),
+     db.prepare('INSERT INTO recovery_notice_outbox(id,account_id,created_at,next_attempt_at) VALUES (?,?,?,?)').bind(crypto.randomUUID(),row.account_id,now,now)
     ]);
    }catch{return null;}
    if(!changes[0]?.results?.length)return null;

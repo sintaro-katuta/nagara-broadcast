@@ -178,3 +178,15 @@ test('a changed session rejects an old checkpoint while account data is refreshi
  await assert.rejects(ui.setPosition('ep',45,'writer-1234567890',1));assert.equal(writeTag,'a'.repeat(64));
  await new Promise(resolve=>setTimeout(resolve,0));assert.equal(ui.isSignedIn(),true);completeOldGet(Response.json({favorites:[],history:[],sessionTag:'a'.repeat(64)}));
 });
+
+test('administrator metrics are hidden for non-admins and discarded after a session change',async()=>{
+ const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout','account-admin-open','account-admin-panel','account-admin-storage','account-admin-mail','account-admin-notices','account-admin-refresh'];
+ const elements=Object.fromEntries(names.map(name=>[name,{hidden:true,disabled:false,textContent:'',focus(){},reset(){}}]));elements['account-dialog'].querySelectorAll=()=>[];
+ globalThis.location={hash:'',pathname:'/',search:''};globalThis.history={state:null,replaceState(){}};globalThis.BroadcastChannel=undefined;globalThis.window={};globalThis.document={getElementById:id=>elements[id],addEventListener(){}};
+ let activeAdmin=true,completeMetrics;const metrics=new Promise(resolve=>{completeMetrics=resolve});
+ globalThis.fetch=async(path)=>{if(path==='/api/auth/status')return Response.json({available:true});if(path==='/api/admin/usage')return metrics;if(path==='/api/account')return Response.json({favorites:[],history:[],sessionTag:(activeAdmin?'a':'b').repeat(64),admin:activeAdmin});throw new Error('unexpected path');};
+ const {makeAccountUI}=await import('../public/account-ui.js?test=admin-metrics');const ui=makeAccountUI({onSession(){},onNotice(){}});await ui.init();assert.equal(elements['account-admin-open'].hidden,false);
+ const pending=elements['account-admin-open'].onclick();activeAdmin=false;ui.revalidate();assert.equal(elements['account-admin-panel'].hidden,true);
+ completeMetrics(Response.json({storage:{count:999,bytes:100},resend:null}));await pending;await new Promise(resolve=>setTimeout(resolve,0));
+ assert.equal(elements['account-admin-open'].hidden,true);assert.notEqual(elements['account-admin-storage'].textContent.includes('999'),true);
+});
