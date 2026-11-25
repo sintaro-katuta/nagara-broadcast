@@ -31,3 +31,27 @@ test('account API rejects unauthorized access and isolates accounts', {skip:!sql
  assert.equal((await accountApi(request('/api/account/favorite',put({episodeId:'unknown',enabled:true})),db,a)).status,404);
  sql.close();
 });
+
+test('only an authenticated admin can return a bounded batch of blocked notices to the queue', {skip:!sqlite&&'node:sqlite unavailable'}, async()=>{
+ const sql=new sqlite.DatabaseSync(':memory:');
+ sql.exec('CREATE TABLE recovery_notice_outbox (id TEXT PRIMARY KEY, blocked_at INTEGER, blocked_reason TEXT, attempts INTEGER, next_attempt_at INTEGER, lease_until INTEGER)');
+ for(let i=0;i<12;i++)sql.prepare('INSERT INTO recovery_notice_outbox VALUES (?, 1, ?, 3, 0, 0)').run(String(i).padStart(2,'0'),'http_403');
+ sql.exec("INSERT INTO recovery_notice_outbox VALUES ('waiting',NULL,NULL,2,123,0),('leased',1,'http_403',3,0,9999999999)");
+ const db={prepare(query){return {bind(...args){return {async run(){return sql.prepare(query).run(...args)}}}}}};
+ const req=(options={})=>new Request('https://radio.example/api/admin/notices/retry',options);
+ const admin=async()=>({accountId:'a',admin:true,sessionTag:'tag'}),user=async()=>({accountId:'a',admin:false,sessionTag:'tag'});
+ const post=(origin='https://radio.example',tag='tag')=>({method:'POST',headers:{Origin:origin,'X-Account-Session':tag}});
+ assert.equal((await accountApi(req(post()),db,async()=>null)).status,401);
+ assert.equal((await accountApi(req(post()),db,user)).status,403);
+ assert.equal((await accountApi(req(post('https://evil.example')),db,admin)).status,403);
+ assert.equal((await accountApi(req(post('https://radio.example','old')),db,admin)).status,409);
+ assert.equal((await accountApi(req(),db,admin)).status,405);
+ assert.equal(sql.prepare('SELECT COUNT(*) AS count FROM recovery_notice_outbox WHERE blocked_at IS NOT NULL').get().count,13);
+ assert.deepEqual(await (await accountApi(req(post()),db,admin)).json(),{queued:10});
+ assert.equal(sql.prepare('SELECT COUNT(*) AS count FROM recovery_notice_outbox WHERE blocked_at IS NOT NULL').get().count,3);
+ assert.equal(sql.prepare("SELECT attempts FROM recovery_notice_outbox WHERE id='waiting'").get().attempts,2);
+ assert.equal(sql.prepare("SELECT attempts FROM recovery_notice_outbox WHERE id='00'").get().attempts,0);
+ assert.deepEqual(await (await accountApi(req(post()),db,admin)).json(),{queued:2});
+ assert.deepEqual(await (await accountApi(req(post()),db,admin)).json(),{queued:0});
+ sql.close();
+});
