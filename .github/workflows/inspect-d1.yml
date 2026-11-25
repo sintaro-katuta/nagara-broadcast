@@ -5,7 +5,7 @@ permissions:
   contents: read
 jobs:
   inspect:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/verify/d1-restore-isolated'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -13,8 +13,8 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
-      - name: Inspect schema and migration history
+      - name: Verify isolated D1 restore
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_D1_READ_TOKEN: ${{ secrets.CLOUDFLARE_D1_READ_TOKEN }}
-        run: node scripts/inspect-d1.mjs
+          CLOUDFLARE_D1_WRITE_TOKEN: ${{ secrets.CLOUDFLARE_D1_WRITE_TOKEN }}
+        run: node scripts/d1-restore-experiment.mjs
