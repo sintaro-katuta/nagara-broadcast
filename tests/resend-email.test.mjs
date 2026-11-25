@@ -6,14 +6,20 @@ test('Resend adapter sends to the fixed API endpoint with the server-side key',a
  let request;t.mock.method(globalThis,'fetch',async(url,options)=>{request={url,options};return Response.json({id:'message-id'});});
  const mailer=makeResendEmail('re_test_key_12345');await mailer.send({from:'sender@example.com',to:'user@example.com',subject:'test',text:'hello'},{idempotencyKey:'notice/id'});
  assert.equal(request.url,'https://api.resend.com/emails');assert.equal(request.options.headers.Authorization,'Bearer re_test_key_12345');
- assert.equal(request.options.headers['Idempotency-Key'],'notice/id');assert.equal(JSON.parse(request.options.body).to,'user@example.com');assert.equal(request.options.redirect,'error');
+ assert.equal(request.options.headers['Idempotency-Key'],'notice/id');assert.equal(JSON.parse(request.options.body).to,'user@example.com');assert.equal(request.options.redirect,'manual');
  assert.equal(makeResendEmail('invalid'),null);
 });
 
 test('usage exposes only verified quota fields and hides provider errors',async(t)=>{
- let mode='ok',requests=0;t.mock.method(globalThis,'fetch',async(url,options)=>{requests++;assert.equal(url,'https://api.resend.com/usage');assert.equal(options.headers.Authorization,'Bearer re_usage_key_12345');if(mode==='error')return new Response('secret',{status:403});return Response.json({emails:{daily:{used:2,limit:100,resets_at:'2026-11-25T00:00:00Z'},monthly:{used:6,limit:null,resets_at:'2026-12-01T00:00:00Z'}},secret:'not exposed'});});
+ let mode='ok',requests=0;t.mock.method(globalThis,'fetch',async(url,options)=>{requests++;assert.equal(url,'https://api.resend.com/usage');assert.equal(options.headers.Authorization,'Bearer re_usage_key_12345');assert.equal(options.redirect,'manual');if(mode==='error')return new Response('secret',{status:403});return Response.json({emails:{daily:{used:2,limit:100,resets_at:'2026-11-25T00:00:00Z'},monthly:{used:6,limit:null,resets_at:'2026-12-01T00:00:00Z'}},secret:'not exposed'});});
  const result=await getResendUsage('re_usage_key_12345');assert.deepEqual(result,{daily:{used:2,limit:100,resetsAt:'2026-11-25T00:00:00Z'},monthly:{used:6,limit:null,resetsAt:'2026-12-01T00:00:00Z'}});
  mode='error';assert.equal(await getResendUsage('re_usage_key_12345'),null);assert.equal(await getResendUsage('invalid'),null);assert.equal(requests,2);
+});
+
+test('redirect responses are rejected without forwarding the API key',async(t)=>{
+ let calls=0;t.mock.method(globalThis,'fetch',async(url,options)=>{calls++;assert.equal(options.redirect,'manual');return new Response(null,{status:302,headers:{Location:'https://other.example/'}});});
+ await assert.rejects(makeResendEmail('re_test_key_12345').send({}),error=>error.status===302);
+ assert.equal(await getResendUsage('re_usage_key_12345'),null);assert.equal(calls,2);
 });
 
 test('Resend quota failures and malformed success responses are treated as failures',async(t)=>{
