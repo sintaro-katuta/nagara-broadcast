@@ -13,9 +13,9 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
-      - name: Install temporary staging secrets
+      - name: Install staging email key
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          NAGARA_STAGE_GATE: ${{ secrets.NAGARA_STAGE_GATE }}
-        run: node scripts/install-staging-secrets.mjs
+          NAGARA_STAGE_RESEND_KEY: ${{ secrets.NAGARA_STAGE_RESEND_KEY }}
+        run: node scripts/install-staging-resend.mjs
