@@ -13,14 +13,20 @@ async function readLimitedJson(request) {
 // and admin flag. This module is not routed until a real verifier is installed.
 export async function accountApi(request,db,verifyIdentity,{getUsage=async()=>null,getNoticeStatus=async()=>null}={}) {
  const url=new URL(request.url);
- if(!['/api/account','/api/account/favorite','/api/account/history','/api/admin/storage','/api/admin/usage'].includes(url.pathname))return null;
+ if(!['/api/account','/api/account/favorite','/api/account/history','/api/admin/storage','/api/admin/usage','/api/admin/notices/retry'].includes(url.pathname))return null;
  const identity=await verifyIdentity(request);
  if(!identity?.accountId)return json({error:'ログインが必要です。'},401);
  if(request.method!=='GET'&&request.headers.get('Origin')!==url.origin)return json({error:'リクエストを確認できません。'},403);
  if(request.method!=='GET'&&(!identity.sessionTag||request.headers.get('X-Account-Session')!==identity.sessionTag))return json({error:'アカウントが変更されました。'},409);
- if(url.pathname==='/api/admin/storage'||url.pathname==='/api/admin/usage'){
-  if(request.method!=='GET')return json({error:'許可されていない操作です。'},405);
+ if(url.pathname.startsWith('/api/admin/')){
   if(identity.admin!==true)return json({error:'権限がありません。'},403);
+  if(url.pathname==='/api/admin/notices/retry'){
+   if(request.method!=='POST')return json({error:'許可されていない操作です。'},405);
+   const now=Math.floor(Date.now()/1000);
+   const result=await db.prepare('UPDATE recovery_notice_outbox SET blocked_at=NULL,blocked_reason=NULL,attempts=0,next_attempt_at=? WHERE id IN (SELECT id FROM recovery_notice_outbox WHERE blocked_at IS NOT NULL AND lease_until<=? ORDER BY blocked_at,id LIMIT 10)').bind(now,now).run();
+   return json({queued:result.meta?.changes??result.changes??0});
+  }
+  if(request.method!=='GET')return json({error:'許可されていない操作です。'},405);
   if(url.pathname==='/api/admin/usage'){
    if(request.headers.get('X-Account-Session')!==identity.sessionTag)return json({error:'アカウントが変更されました。'},409);
    const [storage,resend,notices]=await Promise.all([storageSummary(db),getUsage(),getNoticeStatus()]);return json({storage:{bytes:storage.bytes,count:storage.count},resend,notices});

@@ -190,3 +190,21 @@ test('administrator metrics are hidden for non-admins and discarded after a sess
  completeMetrics(Response.json({storage:{count:999,bytes:100},resend:null}));await pending;await new Promise(resolve=>setTimeout(resolve,0));
  assert.equal(elements['account-admin-open'].hidden,true);assert.notEqual(elements['account-admin-storage'].textContent.includes('999'),true);
 });
+
+test('admin can queue blocked notifications and receives a clear result',async()=>{
+ const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout','account-admin-open','account-admin-panel','account-admin-storage','account-admin-mail','account-admin-notices','account-admin-refresh','account-admin-retry','account-admin-retry-help','account-admin-retry-result'];
+ const elements=Object.fromEntries(names.map(name=>[name,{hidden:true,disabled:false,textContent:'',focus(){},reset(){}}]));elements['account-dialog'].querySelectorAll=()=>[];
+ globalThis.location={hash:'',pathname:'/',search:''};globalThis.history={state:null,replaceState(){}};globalThis.BroadcastChannel=undefined;globalThis.window={};globalThis.document={getElementById:id=>elements[id],addEventListener(){}};
+ let blocked=2,request;
+ globalThis.fetch=async(path,options={})=>{
+  if(path==='/api/auth/status')return Response.json({available:true});
+  if(path==='/api/account')return Response.json({favorites:[],history:[],sessionTag:'a'.repeat(64),admin:true});
+  if(path==='/api/admin/usage')return Response.json({storage:{count:0,bytes:0},resend:null,notices:{waiting:0,blocked}});
+  if(path==='/api/admin/notices/retry'){request=options;blocked=0;return Response.json({queued:2});}
+  throw new Error('unexpected path');
+ };
+ const {makeAccountUI}=await import('../public/account-ui.js?test=admin-retry');const ui=makeAccountUI({onSession(){},onNotice(){}});await ui.init();
+ await elements['account-admin-open'].onclick();assert.equal(elements['account-admin-retry'].hidden,false);
+ await elements['account-admin-retry'].onclick();assert.equal(request.method,'POST');assert.equal(request.headers['X-Account-Session'],'a'.repeat(64));
+ assert.equal(elements['account-admin-retry'].hidden,true);assert.match(elements['account-admin-retry-result'].textContent,/2件を再送待ち/);
+});
