@@ -96,6 +96,19 @@ export function makeAccountUI({onSession,onNotice}){
  $('account-confirm-button').onclick=()=>action(async()=>{if(!link)throw new Error('リンクを確認できません。メールから開き直してください。');await api(`/api/auth/${link.kind}/confirm`,{token:link.token});mode=link.kind;link=null;show('create');message('この端末で使うパスキーを登録してください。');});
  $('account-create-button').onclick=()=>action(async()=>{const client=await webauthn(),options=await api(`/api/auth/${mode}/options`,{}),response=await client.startRegistration({optionsJSON:options});await api(`/api/auth/${mode}/finish`,response);invalidate();notifyTabs();await refresh();show('signed-in');dialog.close();onNotice('パスキーを登録しました。');});
  $('account-logout').onclick=()=>action(async()=>{const tag=sessionTag;const response=await fetch('/api/auth/logout',{method:'POST',headers:{'X-Account-Session':tag||''},credentials:'same-origin'});if(response.status===409||response.status===401){changedElsewhere();throw new Error('アカウントが変更されました。');}if(!response.ok)throw new Error('ログアウトできませんでした。');invalidate(true);notifyTabs();show('anonymous');dialog.close();onNotice('ログアウトしました。');});
+ const deleteButton=$('account-delete');if(deleteButton)deleteButton.onclick=()=>action(async()=>{
+  if(isAdmin)throw new Error('管理者アカウントは削除できません。');
+  if(!sessionTag)throw new Error('ログインが必要です。');
+  if(!window.confirm('アカウント、あとで聴く、再生履歴を削除します。元に戻せません。続けますか？'))return;
+  const tag=sessionTag,version=stateVersion,headers={'X-Account-Session':tag};
+  const client=await webauthn(),options=await api('/api/account/delete/options',{},headers);
+  if(version!==stateVersion||tag!==sessionTag)throw new Error('アカウントが変更されました。');
+  const response=await client.startAuthentication({optionsJSON:options});
+  if(version!==stateVersion||tag!==sessionTag)throw new Error('アカウントが変更されました。');
+  await api('/api/account/delete/finish',response,headers);
+  if(version!==stateVersion||tag!==sessionTag){changedElsewhere();return;}
+  invalidate(true);notifyTabs();show('anonymous');dialog.close();onNotice('アカウントを削除しました。端末に保存されたパスキーは、端末の設定から削除できます。');
+ });
  async function write(path,body,keepalive=false,allowRefresh=false){
   const tag=sessionTag||(allowRefresh?refreshTag:null);if(!tag)throw new Error('ログインが必要です。');
   const request=fetch(path,{method:'PUT',headers:{'Content-Type':'application/json','X-Account-Session':tag},body:JSON.stringify(body),credentials:'same-origin',keepalive});
