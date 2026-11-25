@@ -57,7 +57,7 @@ export function makeAccountUI({onSession,onNotice}){
   initializing=(async()=>{try{const response=await fetch('/api/auth/status',{cache:'no-store'});if(!response.ok)throw new Error('アカウントの状態を確認できませんでした。');enabled=(await response.json()).available===true;if(!enabled){onSession(null,true);return;}await refresh();if(link){show('confirm');message(link.kind==='enroll'?'登録を続けるには、メールアドレスを確認してください。':'復旧を続けるには、メールアドレスを確認してください。');if(!dialog.open)dialog.showModal();}}catch{enabled=false;}})().finally(()=>{initializing=null;});
   return initializing;
  }
- async function action(fn){if(busy)return;setBusy(true);try{await fn();}catch(error){message(error?.name==='NotAllowedError'?'操作がキャンセルされました。もう一度お試しください。':error?.message||'操作できませんでした。もう一度お試しください。');}finally{setBusy(false);}}
+ async function action(fn){if(busy)return;setBusy(true);try{await fn();}catch(error){message(error?.code==='ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED'?'このパスキーは登録済みです。登録済みのパスキーでログインするか、復旧には別のパスキーの保存先を選んでください。':error?.name==='NotAllowedError'?'操作がキャンセルされました。もう一度お試しください。':error?.message||'操作できませんでした。もう一度お試しください。');}finally{setBusy(false);}}
  $('account-close').onclick=()=>dialog.close();
  async function loadAdmin(){
   if(!isAdmin||!sessionTag||!adminPanel)return;
