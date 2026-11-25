@@ -62,7 +62,12 @@ try{
  const fresh=cookie(recovered,'__Host-nagara_session'),data=await (await get('/api/account',fresh)).json();assert.deepEqual(data.favorites,['ep']);
  assert.equal((await put('/api/account/history',{episodeId:'ep',positionSeconds:40,writerId:'writer-1234567890',sequence:2},fresh,data.sessionTag)).status,200);
  assert.equal((await (await get('/api/account',fresh)).json()).history[0].position_seconds,40);
- console.log('Isolated remote D1: registration, signed passkey login, recovery, favorites and history passed; email delivery was mocked.');
+ const deletion=(path,value)=>worker.fetch(new Request(origin+path,{method:'POST',headers:{Origin:origin,Cookie:fresh,'X-Account-Session':data.sessionTag,'Content-Type':'application/json'},body:JSON.stringify(value)}),env);
+ const deleteOptions=await deletion('/api/account/delete/options',{});assert.equal(deleteOptions.status,200);
+ const deleted=await deletion('/api/account/delete/finish',assertion(await deleteOptions.json(),secondId,second.privateKey,origin));assert.equal(deleted.status,200);
+ assert.equal((await get('/api/account',fresh)).status,401);
+ for(const table of ['accounts','passkeys','recovery_emails','favorites','listening_history','account_sessions','recovery_notice_outbox'])assert.equal((await sql(`SELECT COUNT(*) AS n FROM ${table}`))[0].results[0].n,0);
+ console.log('Isolated remote D1: registration, signed passkey login, recovery, favorites, history and account deletion passed; email delivery was mocked.');
 }finally{
  if(id){await request(`/${id}`,'DELETE');console.log('Isolated test database deleted.');}
 }
