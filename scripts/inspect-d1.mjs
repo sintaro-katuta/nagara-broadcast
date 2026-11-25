@@ -24,5 +24,6 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
  try{
   const result=await inspectD1({accountId:process.env.CLOUDFLARE_ACCOUNT_ID,token:process.env.CLOUDFLARE_D1_READ_TOKEN,files:await readdir(new URL('../cloudflare/migrations/',import.meta.url))});
   console.log(JSON.stringify(result,null,2));
+  if(process.argv.includes('--require-complete')&&(!result.episodes||!result.accounts||!result.ledger||result.pending.length||result.unknownCount))throw new Error('Migration verification incomplete; investigate before enabling authentication.');
  }catch(error){console.error(error.message);process.exitCode=1;}
 }
