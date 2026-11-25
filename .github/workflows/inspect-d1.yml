@@ -15,8 +15,9 @@ jobs:
           node-version: '24'
       - name: Install dependencies
         run: npm ci
-      - name: Verify scheduled notifications with isolated D1 and mocked email
+      - name: Send one approved recovery notice to the Resend simulator
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_D1_WRITE_TOKEN: ${{ secrets.CLOUDFLARE_D1_WRITE_TOKEN }}
-        run: node scripts/check-notices-remote.mjs
+          NAGARA_STAGE_RESEND_KEY: ${{ secrets.NAGARA_STAGE_RESEND_KEY }}
+        run: node scripts/check-notice-delivery.mjs
