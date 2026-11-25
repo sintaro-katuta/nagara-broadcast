@@ -13,10 +13,10 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
-      - name: Verify preview admin access and production secret presence
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify scheduled notifications with isolated D1 and mocked email
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_D1_WRITE_TOKEN: ${{ secrets.CLOUDFLARE_D1_WRITE_TOKEN }}
-          NAGARA_STAGE_GATE: ${{ secrets.NAGARA_STAGE_GATE }}
-        run: node scripts/check-admin-preview.mjs
+        run: node scripts/check-notices-remote.mjs
