@@ -8,7 +8,7 @@ if(!/^[a-f0-9]{32}$/i.test(account||'')||!token)throw new Error('D1 test configu
 const api=`https://api.cloudflare.com/client/v4/accounts/${account}/d1/database`,realFetch=globalThis.fetch.bind(globalThis),name=`nagara-notice-test-${randomUUID()}`;let id;
 async function request(path='',method='GET',body){const response=await realFetch(api+path,{method,headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(20000)});const data=await response.json().catch(()=>null);if(!response.ok||!data?.success)throw new Error(`D1 request failed (${response.status})`);return data.result;}
 async function sql(query,params=[]){const result=await request(`/${id}/query`,'POST',{sql:query,params});if(result[0]?.success!==true)throw new Error('D1 test query failed');return result[0];}
-const db={prepare(query){return {bind(...params){return {async run(){return sql(query,params)},async first(){return (await sql(query,params)).results?.[0]||null}}}}};
+const db={prepare(query){return {bind(...params){return {async run(){return sql(query,params)},async first(){return (await sql(query,params)).results?.[0]||null}}}}}};
 try{
  const created=await request('','POST',{name});if(created?.name!==name||!/^[-a-f0-9]{36}$/i.test(created?.uuid||''))throw new Error('Unexpected temporary D1 response');id=created.uuid;
  for(const path of ['../cloudflare/schema.sql','../cloudflare/migrations/0001_account_data.sql','../cloudflare/migrations/0004_recovery_email.sql','../cloudflare/migrations/0015_recovery_notice_outbox.sql','../cloudflare/migrations/0016_recovery_notice_failures.sql'])await sql(await readFile(new URL(path,import.meta.url),'utf8'));
