@@ -16,11 +16,11 @@ test('account API rejects unauthorized access and isolates accounts', {skip:!sql
  assert.equal((await accountApi(request('/api/account'),db,async()=>null)).status,401);
  assert.equal((await accountApi(request('/api/admin/storage'),db,a)).status,403);
  assert.equal((await accountApi(request('/api/admin/storage'),db,admin)).status,200);
- let reads=0;const usage={getUsage:async()=>{reads++;return {daily:{used:2,limit:100},monthly:{used:2,limit:3000}}}};
+ let reads=0;const usage={getUsage:async()=>{reads++;return {daily:{used:2,limit:100},monthly:{used:2,limit:3000}}},getNoticeStatus:async()=>({waiting:2,blocked:1})};
  assert.equal((await accountApi(request('/api/admin/usage'),db,async()=>null,usage)).status,401);
  assert.equal((await accountApi(request('/api/admin/usage'),db,a,usage)).status,403);
  assert.equal((await accountApi(request('/api/admin/usage',{headers:{'X-Account-Session':'wrong'}}),db,admin,usage)).status,409);assert.equal(reads,0);
- const adminData=await (await accountApi(request('/api/admin/usage',{headers:{'X-Account-Session':'tag-a'}}),db,admin,usage)).json();assert.equal(adminData.storage.count,1);assert.equal(adminData.resend.daily.used,2);assert.equal(reads,1);
+ const adminData=await (await accountApi(request('/api/admin/usage',{headers:{'X-Account-Session':'tag-a'}}),db,admin,usage)).json();assert.equal(adminData.storage.count,1);assert.equal(adminData.resend.daily.used,2);assert.deepEqual(adminData.notices,{waiting:2,blocked:1});assert.equal(reads,1);
  assert.equal((await (await accountApi(request('/api/account'),db,admin)).json()).admin,true);
  assert.equal((await accountApi(request('/api/account/favorite',put({episodeId:'ep',enabled:true},'https://evil.example')),db,a)).status,403);
  assert.equal((await accountApi(request('/api/account/favorite',put({episodeId:'ep',enabled:true})),db,b)).status,409);

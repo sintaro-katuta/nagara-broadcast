@@ -21,3 +21,17 @@ test('Resend quota failures and malformed success responses are treated as failu
  const mailer=makeResendEmail('re_test_key_12345');await assert.rejects(mailer.send({}),error=>error.message==='Email delivery request failed');
  status=200;await assert.rejects(mailer.send({}),/response invalid/);
 });
+
+test('provider errors distinguish permanent failures and retryable limits without exposing details',async(t)=>{
+ let status=429;t.mock.method(globalThis,'fetch',async()=>new Response('private provider detail',{status,headers:{'Retry-After':'7200'}}));
+ const mailer=makeResendEmail('re_test_key_12345');
+ await assert.rejects(mailer.send({}),error=>error.retryable===true&&error.retryAfter===7200&&!error.message.includes('private'));
+ status=403;await assert.rejects(mailer.send({}),error=>error.retryable===false&&error.status===403);
+});
+
+test('idempotency conflicts retry only while the matching request is still in progress',async(t)=>{
+ let name='concurrent_idempotent_requests';t.mock.method(globalThis,'fetch',async()=>Response.json({name},{status:409}));
+ const mailer=makeResendEmail('re_test_key_12345');
+ await assert.rejects(mailer.send({}),error=>error.status===409&&error.retryable===true);
+ name='invalid_idempotent_request';await assert.rejects(mailer.send({}),error=>error.status===409&&error.retryable===false);
+});

@@ -180,7 +180,7 @@ test('a changed session rejects an old checkpoint while account data is refreshi
 });
 
 test('administrator metrics are hidden for non-admins and discarded after a session change',async()=>{
- const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout','account-admin-open','account-admin-panel','account-admin-storage','account-admin-mail','account-admin-refresh'];
+ const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout','account-admin-open','account-admin-panel','account-admin-storage','account-admin-mail','account-admin-notices','account-admin-refresh'];
  const elements=Object.fromEntries(names.map(name=>[name,{hidden:true,disabled:false,textContent:'',focus(){},reset(){}}]));elements['account-dialog'].querySelectorAll=()=>[];
  globalThis.location={hash:'',pathname:'/',search:''};globalThis.history={state:null,replaceState(){}};globalThis.BroadcastChannel=undefined;globalThis.window={};globalThis.document={getElementById:id=>elements[id],addEventListener(){}};
  let activeAdmin=true,completeMetrics;const metrics=new Promise(resolve=>{completeMetrics=resolve});

@@ -29,7 +29,7 @@ export function makeAccountUI({onSession,onNotice}){
  function show(kind){stage=kind;$('account-anonymous').hidden=kind!=='anonymous';$('account-confirm').hidden=kind!=='confirm';$('account-create').hidden=kind!=='create';$('account-signed-in').hidden=kind!=='signed-in';}
  function setBusy(value){busy=value;dialog.querySelectorAll('button,input').forEach(element=>element.disabled=value);}
  async function open(){if(!enabled){await init();if(!enabled){onNotice('ログイン機能を確認できませんでした。接続を確認して、もう一度お試しください。');return;}}if(stage!=='confirm'&&stage!=='create'){show(signedIn?'signed-in':'anonymous');message(signedIn?'ログインしています。':'ログインすると、あとで聴くと再生履歴を別の端末でも使えます。');}if(!dialog.open)dialog.showModal();}
- function invalidate(ready=false,positionTag=null){stateVersion++;signedIn=false;isAdmin=false;sessionTag=null;refreshTag=positionTag;if(adminOpen)adminOpen.hidden=true;if(adminPanel){adminPanel.hidden=true;$('account-admin-storage').textContent='';$('account-admin-mail').textContent='';}onSession(null,ready);}
+ function invalidate(ready=false,positionTag=null){stateVersion++;signedIn=false;isAdmin=false;sessionTag=null;refreshTag=positionTag;if(adminOpen)adminOpen.hidden=true;if(adminPanel){adminPanel.hidden=true;$('account-admin-storage').textContent='';$('account-admin-mail').textContent='';$('account-admin-notices').textContent='';}onSession(null,ready);}
  function notifyTabs(){if(channel)channel.postMessage('changed');else try{localStorage.setItem('nagara:session-change',crypto.randomUUID());}catch{}}
  async function refresh(){
   const version=stateVersion;
@@ -61,7 +61,7 @@ export function makeAccountUI({onSession,onNotice}){
  async function loadAdmin(){
   if(!isAdmin||!sessionTag||!adminPanel)return;
   const version=stateVersion,tag=sessionTag;adminPanel.hidden=false;
-  $('account-admin-storage').textContent='音声の情報を読み込んでいます。';$('account-admin-mail').textContent='メールの使用状況を読み込んでいます。';
+  $('account-admin-storage').textContent='音声の情報を読み込んでいます。';$('account-admin-mail').textContent='メールの使用状況を読み込んでいます。';$('account-admin-notices').textContent='復旧通知の状態を読み込んでいます。';
   try{
    const response=await fetch('/api/admin/usage',{headers:{'X-Account-Session':tag},credentials:'same-origin',cache:'no-store'});
    if(version!==stateVersion||tag!==sessionTag)return;
@@ -70,7 +70,8 @@ export function makeAccountUI({onSession,onNotice}){
    $('account-admin-storage').textContent=`登録済み音声：${result.storage.count.toLocaleString()}本・${(result.storage.bytes/1e9).toFixed(2)} GB`;
    const show=part=>`${part.used.toLocaleString()} / ${part.limit===null?'上限なし':part.limit.toLocaleString()}通（更新 ${new Date(part.resetsAt).toLocaleString('ja-JP')}）`;
    $('account-admin-mail').textContent=result.resend?`メール使用数　今日：${show(result.resend.daily)}　今月：${show(result.resend.monthly)}`:'メールの使用状況を取得できません。接続設定を確認してください。';
-  }catch{if(version===stateVersion){$('account-admin-storage').textContent='管理情報を取得できませんでした。';$('account-admin-mail').textContent='時間をおいて更新してください。';}}
+   $('account-admin-notices').textContent=result.notices?`復旧通知：送信待ち ${result.notices.waiting.toLocaleString()}件・要確認 ${result.notices.blocked.toLocaleString()}件`:'復旧通知の状態を取得できません。';
+  }catch{if(version===stateVersion){$('account-admin-storage').textContent='管理情報を取得できませんでした。';$('account-admin-mail').textContent='時間をおいて更新してください。';$('account-admin-notices').textContent='';}}
  }
  if(adminOpen)adminOpen.onclick=loadAdmin;if($('account-admin-refresh'))$('account-admin-refresh').onclick=loadAdmin;
  dialog.querySelectorAll('[data-account-restart]').forEach(button=>button.onclick=()=>{link=null;show(signedIn?'signed-in':'anonymous');message('ログインすると、あとで聴くと再生履歴を別の端末でも使えます。');});

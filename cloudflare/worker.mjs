@@ -53,7 +53,10 @@ export default {
      const cookie=await revokeSession(request,env.DB);
      return new Response(JSON.stringify({ok:true}),{headers:{'Content-Type':'application/json','Cache-Control':'no-store','Set-Cookie':cookie}});
     }
-    const accountResponse=await accountApi(request,env.DB,req=>verifySession(req,env.DB),{getUsage:()=>getResendUsage(env.RESEND_USAGE_API_KEY)});if(accountResponse)return accountResponse;
+    const accountResponse=await accountApi(request,env.DB,req=>verifySession(req,env.DB),{
+     getUsage:()=>getResendUsage(env.RESEND_USAGE_API_KEY),
+     getNoticeStatus:async()=>{try{const row=await env.DB.prepare('SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN blocked_at IS NOT NULL THEN 1 ELSE 0 END),0) AS blocked FROM recovery_notice_outbox').first();return {waiting:row.total-row.blocked,blocked:row.blocked};}catch{return null;}}
+    });if(accountResponse)return accountResponse;
    }
    if(request.method==='GET'&&url.pathname==='/api/episodes'){
     const episodes=await list(env);return json({episodes,channels,storageBytes:episodes.reduce((n,x)=>n+x.size,0)});
