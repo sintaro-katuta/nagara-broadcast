@@ -7,3 +7,8 @@ const cookie=access.headers.getSetCookie()[0].split(';')[0];
 const response=await fetch(origin+'/__preview/resend-diagnostic',{method:'POST',headers:{Origin:origin,Cookie:cookie}});
 if(!response.ok)throw new Error(`Diagnostic failed: ${response.status}`);
 console.log(JSON.stringify(await response.json()));
+const episodes=await fetch(origin+'/api/episodes',{headers:{Cookie:cookie}});
+if(!episodes.ok||!(await episodes.json()).episodes.some(x=>x.id==='preview-audio-fixture'))throw new Error('Preview episode is not available');
+const audio=await fetch(origin+'/audio/preview-audio-fixture.mp3',{headers:{Cookie:cookie,Range:'bytes=0-43'}});
+if(audio.status!==206||audio.headers.get('content-type')!=='audio/wav'||(await audio.arrayBuffer()).byteLength!==44)throw new Error('Preview audio not available');
+console.log('Isolated preview episode and ranged audio verified');
