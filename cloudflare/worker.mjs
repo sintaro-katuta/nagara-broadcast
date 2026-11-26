@@ -36,7 +36,7 @@ export default {
    console.log('Recovery notices',JSON.stringify(result));
   }
  },
- async fetch(request,env){
+ async fetch(request,env,ctx){
   const url=new URL(request.url);
   try{
    if(request.method==='GET'&&url.pathname==='/api/auth/status'){
@@ -45,7 +45,7 @@ export default {
    }
    if(env.AUTH_ENABLED==='true'){
     if(env.PASSKEY_API_ENABLED==='true'){
-     const response=await authRoutes(request,{...env,EMAIL:makeResendEmail(env.RESEND_API_KEY)});if(response)return response;
+     const response=await authRoutes(request,{...env,EMAIL:makeResendEmail(env.RESEND_API_KEY)},ctx);if(response)return response;
      const deletion=await accountDeletion(request,env,req=>verifySession(req,env.DB));if(deletion)return deletion;
     }
     if(url.pathname==='/api/auth/logout'&&request.method==='POST'){

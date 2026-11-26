@@ -9,6 +9,38 @@ import {makePasskeyLogin} from '../cloudflare/passkey-login.mjs';
 import {verifySession} from '../cloudflare/sessions.mjs';
 const sqlite=await import('node:sqlite').catch(()=>null);
 
+test('recovery response does not wait for account lookup or delivery when a Worker context is available',async()=>{
+ const db={prepare(){return {bind(_key,expiry){return {async first(){return {attempts:1,expires_at:expiry}}}}}}};
+ let release;const pending=new Promise(resolve=>{release=resolve});let sent=0;const tasks=[];
+ const recovery={async issue(){await pending;return {to:'synthetic@example.com',token:'a'.repeat(64)}}};
+ const routes=makeAuthRoutes({recovery,sendRecovery:async()=>{sent++}});
+ const origin='https://radio.example',env={DB:db,AUTH_ORIGIN:origin,AUTH_RATE_KEY:'01'.repeat(32),AUTH_LOOKUP_KEY:'02'.repeat(32),AUTH_ENCRYPTION_KEY:'03'.repeat(32),AUTH_EMAIL_FROM:'sender@example.com',EMAIL:{async send(){}}};
+ const request=new Request(origin+'/api/auth/recovery/start',{method:'POST',headers:{Origin:origin,'CF-Connecting-IP':'192.0.2.1','Content-Type':'application/json'},body:JSON.stringify({email:'synthetic@example.com'})});
+ const response=await routes(request,env,{waitUntil(task){tasks.push(task)}});
+ assert.equal(response.status,200);assert.deepEqual(await response.json(),{ok:true});assert.equal(tasks.length,1);assert.equal(sent,0);
+ release();await Promise.all(tasks);assert.equal(sent,1);
+});
+
+test('Worker forwards its execution context to email delivery',async(t)=>{
+ const buckets=new Map(),db={prepare(){return {bind(id,expires){return {async first(){const n=(buckets.get(id)||0)+1;buckets.set(id,n);return {attempts:n,expires_at:expires}},async run(){return {success:true}}}}}}};
+ let release;const pending=new Promise(resolve=>{release=resolve});const tasks=[];let requested=false;
+ t.mock.method(globalThis,'fetch',async()=>{requested=true;await pending;return Response.json({id:'synthetic'})});
+ const origin='https://radio.example',env={DB:db,AUTH_ENABLED:'true',PASSKEY_API_ENABLED:'true',AUTH_NOTICES_ENABLED:'true',AUTH_ORIGIN:origin,AUTH_RATE_KEY:'01'.repeat(32),AUTH_LOOKUP_KEY:'02'.repeat(32),AUTH_ENCRYPTION_KEY:'03'.repeat(32),AUTH_EMAIL_FROM:'sender@example.com',RESEND_API_KEY:'re_test_key_12345'};
+ const request=new Request(origin+'/api/auth/enroll/start',{method:'POST',headers:{Origin:origin,'CF-Connecting-IP':'192.0.2.1','Content-Type':'application/json'},body:JSON.stringify({email:'synthetic@example.com'})});
+ const response=await worker.fetch(request,env,{waitUntil(task){tasks.push(task)}});assert.equal(response.status,200);assert.equal(tasks.length,1);
+ release();await Promise.all(tasks);assert.equal(requested,true);
+});
+
+test('background recovery errors do not change the response or expose details',async(t)=>{
+ const db={prepare(){return {bind(_key,expiry){return {async first(){return {attempts:1,expires_at:expiry}}}}}}};
+ const tasks=[],logged=[];t.mock.method(console,'error',value=>logged.push(value));
+ const routes=makeAuthRoutes({recovery:{async issue(){throw new Error('sensitive test detail')}}});
+ const origin='https://radio.example',env={DB:db,AUTH_ORIGIN:origin,AUTH_RATE_KEY:'01'.repeat(32),AUTH_LOOKUP_KEY:'02'.repeat(32),AUTH_ENCRYPTION_KEY:'03'.repeat(32),AUTH_EMAIL_FROM:'sender@example.com',EMAIL:{async send(){}}};
+ const request=new Request(origin+'/api/auth/recovery/start',{method:'POST',headers:{Origin:origin,'CF-Connecting-IP':'192.0.2.1','Content-Type':'application/json'},body:JSON.stringify({email:'synthetic@example.com'})});
+ const response=await routes(request,env,{waitUntil(task){tasks.push(task)}});assert.deepEqual(await response.json(),{ok:true});await Promise.all(tasks);
+ assert.deepEqual(logged,['Authentication email preparation failed']);
+});
+
 test('auth routes enforce origin, limit email requests and keep tokens in cookies',async()=>{
  const buckets=new Map(),db={prepare(){return {bind(id,expires){return {async first(){const n=(buckets.get(id)||0)+1;buckets.set(id,n);return {attempts:n,expires_at:expires}}}}}}};
  const calls=[],token='a'.repeat(64),session='__Host-nagara_session=abc; Path=/; Secure; HttpOnly; SameSite=Lax';
