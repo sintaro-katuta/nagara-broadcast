@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {buildQueue,nextIds,previousId,resumePosition,createPositionWriter} from '../public/player-model.js';
+import {buildQueue,nextIds,previousId,resumePosition,createPositionWriter,createHistoryWriteGuard} from '../public/player-model.js';
 test('a filtered playlist continues only within that list',()=>{
  const all=[{id:'a'},{id:'b'},{id:'c'}];
  const queue=buildQueue([all[0],all[2]],all,'a');
@@ -34,4 +34,19 @@ test('position writes start immediately even while an earlier request is pending
  const pending=send('ep',30);const pause=send('ep',45);assert.deepEqual(requests.map(row=>[row[1],row[3],row[4]]),[[30,1,false],[45,2,false]]);
  signedIn=false;send('ep',50);signedIn=true;const final=send('ep',60,true);assert.deepEqual(requests[2],['ep',60,'writer-1234567890',3,true]);
  await pause;await final;resolveFirst();await pending;
+});
+test('history generation changes suppress paused positions until playback resumes',()=>{
+ const guard=createHistoryWriteGuard(),session=(tag,generation)=>({sessionTag:tag,historyGeneration:generation});
+ guard.observeSession(session('a',0),true,false);assert.equal(guard.canWrite(),true);
+ guard.observeSession(null,true,true);guard.observeSession(session('a',0),true,true);assert.equal(guard.canWrite(),true);
+ guard.observeSession(null,true,true);guard.observeSession(session('a',1),true,true);assert.equal(guard.canWrite(),false);
+ guard.observeSession(null,true,true);guard.observeSession(session('a',1),true,true);assert.equal(guard.canWrite(),false);
+ guard.resume();assert.equal(guard.canWrite(),true);
+ guard.observeSession(session('b',1),true,true);assert.equal(guard.canWrite(),false);
+ guard.resume();guard.observeSession(session('b',2),false,true);assert.equal(guard.canWrite(),true);
+ guard.suppress();assert.equal(guard.canWrite(),false);guard.resume();assert.equal(guard.canWrite(),true);
+});
+test('first login while a previously selected episode is paused cannot save its old position',()=>{
+ const guard=createHistoryWriteGuard();guard.observeSession({sessionTag:'a',historyGeneration:0},true,true);assert.equal(guard.canWrite(),false);
+ guard.resume();assert.equal(guard.canWrite(),true);
 });

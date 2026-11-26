@@ -1,5 +1,18 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {createHistoryWriteGuard,createPositionWriter} from '../public/player-model.js';
+
+test('a paused tab cannot restore deleted history after receiving a new generation',async()=>{
+ const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout'];
+ const elements=Object.fromEntries(names.map(name=>[name,{hidden:false,disabled:false,textContent:'',focus(){},reset(){}}]));elements['account-dialog'].querySelectorAll=()=>[];
+ globalThis.location={hash:'',pathname:'/',search:''};globalThis.history={state:null,replaceState(){}};globalThis.window={};globalThis.document={getElementById:id=>elements[id],addEventListener(){}};globalThis.BroadcastChannel=undefined;
+ let generation=0;const writes=[];globalThis.fetch=async(path,options={})=>{if(path==='/api/auth/status')return Response.json({available:true});if(path==='/api/account')return Response.json({favorites:[],history:[],historyGeneration:generation,sessionTag:'a'.repeat(64)});if(path==='/api/account/history'){writes.push(JSON.parse(options.body));return Response.json({ok:true});}throw new Error('unexpected request');};
+ const {makeAccountUI}=await import('../public/account-ui.js?test=paused-tab-clear');const guard=createHistoryWriteGuard();let hasCurrent=false;
+ const ui=makeAccountUI({onSession:data=>guard.observeSession(data,true,hasCurrent),onNotice(){}});await ui.init();hasCurrent=true;generation=1;ui.revalidate();await new Promise(resolve=>setTimeout(resolve,0));
+ const write=createPositionWriter(ui,'writer-1234567890',()=>assert.fail('unexpected error'));
+ if(guard.canWrite())await write('ep',45,true);assert.deepEqual(writes,[]);
+ guard.resume();if(guard.canWrite())await write('ep',46);assert.equal(writes.length,1);assert.equal(writes[0].historyGeneration,1);
+});
 
 test('clearing history refreshes the session, preserves favorites and notifies other tabs',async()=>{
  const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout'];
