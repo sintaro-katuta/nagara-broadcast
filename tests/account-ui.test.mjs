@@ -19,6 +19,34 @@ test('a failed history deletion does not claim success or erase the current sess
  const {makeAccountUI}=await import('../public/account-ui.js?test=clear-history-failure');const sessions=[];const ui=makeAccountUI({onSession:value=>sessions.push(value),onNotice(){}});await ui.init();await assert.rejects(ui.clearHistory(),/削除できませんでした/);assert.equal(ui.isSignedIn(),true);assert.equal(sessions.at(-1).history.length,1);
 });
 
+test('history deletion refreshes and notifies after overlapping revalidation',async()=>{
+ for(const order of ['revalidation-first','delete-first']){
+  const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout'];
+  const elements=Object.fromEntries(names.map(name=>[name,{hidden:false,disabled:false,textContent:'',focus(){},reset(){}}]));elements['account-dialog'].querySelectorAll=()=>[];
+  globalThis.location={hash:'',pathname:'/',search:''};globalThis.history={state:null,replaceState(){}};globalThis.window={};globalThis.document={getElementById:id=>elements[id],addEventListener(){}};
+  const events=[];globalThis.BroadcastChannel=class{postMessage(value){events.push(value)}};
+  let finishDelete,finishOldGet,cleared=false,reads=0;const deletePending=new Promise(resolve=>{finishDelete=resolve}),oldGet=new Promise(resolve=>{finishOldGet=resolve});
+  const data=history=>Response.json({favorites:['saved'],history,historyGeneration:history.length?0:1,sessionTag:'a'.repeat(64)}),oldHistory=[{episode_id:'ep',position_seconds:42}];
+  globalThis.fetch=async(path,options={})=>{if(path==='/api/auth/status')return Response.json({available:true});if(path==='/api/account'){reads++;if(reads===2&&order==='delete-first')return oldGet;return data(cleared?[]:oldHistory);}if(path==='/api/account/history'&&options.method==='DELETE'){await deletePending;cleared=true;return Response.json({ok:true});}throw new Error('unexpected request');};
+  const {makeAccountUI}=await import('../public/account-ui.js?test=clear-race-'+order);const sessions=[];const ui=makeAccountUI({onSession:value=>sessions.push(value),onNotice(){}});await ui.init();const deleting=ui.clearHistory();ui.revalidate();
+  if(order==='revalidation-first')await new Promise(resolve=>setTimeout(resolve,0));
+  finishDelete();await deleting;
+  if(order==='delete-first'){finishOldGet(data(oldHistory));await new Promise(resolve=>setTimeout(resolve,0));}
+  assert.deepEqual(sessions.at(-1).history,[]);assert.deepEqual(sessions.at(-1).favorites,['saved']);assert.equal(sessions.at(-1).historyGeneration,1);assert.deepEqual(events,['changed']);
+ }
+});
+
+test('successful deletion does not overwrite a different account selected while waiting',async()=>{
+ const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout'];
+ const elements=Object.fromEntries(names.map(name=>[name,{hidden:false,disabled:false,textContent:'',focus(){},reset(){}}]));elements['account-dialog'].querySelectorAll=()=>[];
+ globalThis.location={hash:'',pathname:'/',search:''};globalThis.history={state:null,replaceState(){}};globalThis.window={};globalThis.document={getElementById:id=>elements[id],addEventListener(){}};
+ const events=[];globalThis.BroadcastChannel=class{postMessage(value){events.push(value)}};
+ let finishDelete,tag='a';const pending=new Promise(resolve=>{finishDelete=resolve});
+ globalThis.fetch=async(path,options={})=>{if(path==='/api/auth/status')return Response.json({available:true});if(path==='/api/account')return Response.json({favorites:[tag],history:[],historyGeneration:0,sessionTag:tag.repeat(64)});if(path==='/api/account/history'&&options.method==='DELETE'){await pending;return Response.json({ok:true});}throw new Error('unexpected request');};
+ const {makeAccountUI}=await import('../public/account-ui.js?test=clear-account-switch');const sessions=[];const ui=makeAccountUI({onSession:value=>sessions.push(value),onNotice(){}});await ui.init();const deleting=ui.clearHistory();tag='b';ui.revalidate();await new Promise(resolve=>setTimeout(resolve,0));finishDelete();
+ await assert.rejects(deleting,/履歴は削除されましたが、アカウントが変更/);assert.deepEqual(sessions.at(-1).favorites,['b']);assert.equal(ui.isSignedIn(),true);assert.deepEqual(events,['changed']);
+});
+
 test('recovery explains an already registered passkey and permits retry',async()=>{
  const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout'];
  const elements=Object.fromEntries(names.map(name=>[name,{hidden:false,disabled:false,textContent:'',focus(){},reset(){}}]));
