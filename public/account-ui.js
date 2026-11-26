@@ -21,7 +21,7 @@ function webauthn(){
 }
 
 export function makeAccountUI({onSession,onNotice}){
- let enabled=false,signedIn=false,isAdmin=false,sessionTag=null,refreshTag=null,mode='enroll',link=initialLink,busy=false,stage='anonymous',stateVersion=0,initializing=null;
+ let enabled=false,signedIn=false,isAdmin=false,sessionTag=null,refreshTag=null,historyGeneration=null,refreshGeneration=null,mode='enroll',link=initialLink,busy=false,stage='anonymous',stateVersion=0,initializing=null;
  let positionRevision=0;const pendingPositions=new Set();
  const channel=typeof BroadcastChannel==='function'?new BroadcastChannel('nagara-account-session'):null;
  const dialog=$('account-dialog');
@@ -30,7 +30,7 @@ export function makeAccountUI({onSession,onNotice}){
  function show(kind){stage=kind;$('account-anonymous').hidden=kind!=='anonymous';$('account-confirm').hidden=kind!=='confirm';$('account-create').hidden=kind!=='create';$('account-signed-in').hidden=kind!=='signed-in';}
  function setBusy(value){busy=value;dialog.querySelectorAll('button,input').forEach(element=>element.disabled=value);}
  async function open(){if(!enabled){await init();if(!enabled){onNotice('ログイン機能を確認できませんでした。接続を確認して、もう一度お試しください。');return;}}if(stage!=='confirm'&&stage!=='create'){show(signedIn?'signed-in':'anonymous');message(signedIn?'ログインしています。':'ログインすると、あとで聴くと再生履歴を別の端末でも使えます。');}if(!dialog.open)dialog.showModal();}
- function invalidate(ready=false,positionTag=null){stateVersion++;signedIn=false;isAdmin=false;sessionTag=null;refreshTag=positionTag;if(adminOpen)adminOpen.hidden=true;if(adminPanel){adminPanel.hidden=true;$('account-admin-storage').textContent='';$('account-admin-mail').textContent='';$('account-admin-notices').textContent='';if($('account-admin-retry'))$('account-admin-retry').hidden=true;if($('account-admin-retry-help'))$('account-admin-retry-help').hidden=true;if($('account-admin-retry-result'))$('account-admin-retry-result').textContent='';}onSession(null,ready);}
+ function invalidate(ready=false,positionTag=null,positionGeneration=null){stateVersion++;signedIn=false;isAdmin=false;sessionTag=null;historyGeneration=null;refreshTag=positionTag;refreshGeneration=positionGeneration;if(adminOpen)adminOpen.hidden=true;if(adminPanel){adminPanel.hidden=true;$('account-admin-storage').textContent='';$('account-admin-mail').textContent='';$('account-admin-notices').textContent='';if($('account-admin-retry'))$('account-admin-retry').hidden=true;if($('account-admin-retry-help'))$('account-admin-retry-help').hidden=true;if($('account-admin-retry-result'))$('account-admin-retry-result').textContent='';}onSession(null,ready);}
  function notifyTabs(){if(channel)channel.postMessage('changed');else try{localStorage.setItem('nagara:session-change',crypto.randomUUID());}catch{}}
  async function refresh(){
   const version=stateVersion;
@@ -42,12 +42,13 @@ export function makeAccountUI({onSession,onNotice}){
    if(!response.ok)throw new Error('アカウント情報を読み込めませんでした。');
    const value=await response.json();if(version!==stateVersion)return;
    if(typeof value.sessionTag!=='string'||!/^[a-f0-9]{64}$/.test(value.sessionTag))throw new Error('アカウント情報を確認できませんでした。');
+   if(!Number.isSafeInteger(value.historyGeneration)||value.historyGeneration<0)throw new Error('再生履歴の状態を確認できませんでした。');
    const pending=[...pendingPositions].filter(item=>item.tag===value.sessionTag);
    if(pending.length||revision!==positionRevision){await Promise.allSettled(pending.map(item=>item.request));continue;}
-   refreshTag=null;sessionTag=value.sessionTag;signedIn=true;isAdmin=value.admin===true;if(adminOpen)adminOpen.hidden=!isAdmin;onSession(value,true);return;
+   refreshTag=null;refreshGeneration=null;sessionTag=value.sessionTag;historyGeneration=value.historyGeneration;signedIn=true;isAdmin=value.admin===true;if(adminOpen)adminOpen.hidden=!isAdmin;onSession(value,true);return;
   }
  }
- function changedElsewhere(){if(!enabled){init();return;}invalidate(false,sessionTag||refreshTag);refresh().catch(()=>onNotice('アカウント情報を確認できませんでした。'));}
+ function changedElsewhere(){if(!enabled){init();return;}invalidate(false,sessionTag||refreshTag,historyGeneration??refreshGeneration);refresh().catch(()=>onNotice('アカウント情報を確認できませんでした。'));}
  if(channel)channel.onmessage=event=>{if(event.data==='changed')changedElsewhere();};
  if(!channel&&typeof window.addEventListener==='function')window.addEventListener('storage',event=>{if(event.key==='nagara:session-change')changedElsewhere();});
  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')changedElsewhere();});
@@ -123,8 +124,8 @@ export function makeAccountUI({onSession,onNotice}){
   open,
   revalidate:changedElsewhere,
   isSignedIn:()=>signedIn,
-  canWritePosition:()=>!!(sessionTag||refreshTag),
+  canWritePosition:()=>!!(sessionTag||refreshTag)&&Number.isSafeInteger(historyGeneration??refreshGeneration),
   async setFavorite(id,enabled){return write('/api/account/favorite',{episodeId:id,enabled});},
-  async setPosition(id,positionSeconds,writerId,sequence,keepalive=false){return write('/api/account/history',{episodeId:id,positionSeconds,writerId,sequence},keepalive,true);}
+  async setPosition(id,positionSeconds,writerId,sequence,keepalive=false){const generation=historyGeneration??refreshGeneration;if(!Number.isSafeInteger(generation))throw new Error('再生履歴を確認できませんでした。');return write('/api/account/history',{episodeId:id,positionSeconds,writerId,sequence,historyGeneration:generation},keepalive,true);}
  };
 }

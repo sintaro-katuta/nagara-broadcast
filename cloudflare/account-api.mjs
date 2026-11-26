@@ -50,7 +50,8 @@ export async function accountApi(request,db,verifyIdentity,{getUsage=async()=>nu
  }else{
   if(typeof body.positionSeconds!=='number'||!Number.isFinite(body.positionSeconds)||body.positionSeconds<0||body.positionSeconds>604800)return json({error:'再生位置が不正です。'},400);
   if(typeof body.writerId!=='string'||!/^[-a-zA-Z0-9_]{16,80}$/.test(body.writerId)||!Number.isSafeInteger(body.sequence)||body.sequence<1)return json({error:'再生位置の更新が不正です。'},400);
-  await setListeningPosition(db,identity.accountId,body.episodeId,body.positionSeconds,body.writerId,body.sequence);
+  if(!Number.isSafeInteger(body.historyGeneration)||body.historyGeneration<0)return json({error:'再生履歴の状態が不正です。'},400);
+  if(!await setListeningPosition(db,identity.accountId,body.episodeId,body.positionSeconds,body.writerId,body.sequence,body.historyGeneration))return json({error:'再生履歴が変更されました。'},409);
  }
  return json({ok:true});
 }

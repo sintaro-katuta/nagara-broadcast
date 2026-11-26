@@ -8,8 +8,10 @@ test('account API rejects unauthorized access and isolates accounts', {skip:!sql
  const sql=new sqlite.DatabaseSync(':memory:');sql.exec('PRAGMA foreign_keys=ON');
  sql.exec(readFileSync(new URL('../cloudflare/schema.sql',import.meta.url),'utf8'));
  sql.exec(readFileSync(new URL('../cloudflare/migrations/0001_account_data.sql',import.meta.url),'utf8'));
+ sql.exec(readFileSync(new URL('../cloudflare/migrations/0013_position_write_cursors.sql',import.meta.url),'utf8'));
+ sql.exec(readFileSync(new URL('../cloudflare/migrations/0018_history_generations.sql',import.meta.url),'utf8'));
  sql.exec("INSERT INTO accounts VALUES ('a'),('b'); INSERT INTO episodes VALUES ('ep','title','tech','','',10,3,'2026-01-01','audio/ep')");
- const db={prepare(query){return {bind(...args){return {async run(){return sql.prepare(query).run(...args)},async all(){return {results:sql.prepare(query).all(...args)}},async first(){return sql.prepare(query).get(...args)||null}}},async all(){return {results:sql.prepare(query).all()}}}}};
+ const db={prepare(query){return {bind(...args){return {async run(){const statement=sql.prepare(query);return /^\s*SELECT\b/i.test(query)?{results:statement.all(...args)}:{meta:{changes:Number(statement.run(...args).changes)}}},async all(){return {results:sql.prepare(query).all(...args)}},async first(){return sql.prepare(query).get(...args)||null}}},async all(){return {results:sql.prepare(query).all()}}}},async batch(items){sql.exec('BEGIN');try{const out=[];for(const item of items)out.push(await item.run());sql.exec('COMMIT');return out}catch(error){sql.exec('ROLLBACK');throw error}}};
  const request=(path,opts={})=>new Request('https://radio.example'+path,opts);
  const a=async()=>({accountId:'a',admin:false,sessionTag:'tag-a'}),b=async()=>({accountId:'b',admin:false,sessionTag:'tag-b'}),admin=async()=>({accountId:'a',admin:true,sessionTag:'tag-a'});
  const put=(body,origin='https://radio.example',tag='tag-a')=>({method:'PUT',headers:{'Content-Type':'application/json',Origin:origin,'X-Account-Session':tag},body:JSON.stringify(body)});
@@ -29,6 +31,16 @@ test('account API rejects unauthorized access and isolates accounts', {skip:!sql
  assert.deepEqual((await (await accountApi(request('/api/account'),db,a)).json()).favorites,['ep']);
  assert.equal((await accountApi(request('/api/account/history',put({episodeId:'ep',positionSeconds:-1})),db,a)).status,400);
  assert.equal((await accountApi(request('/api/account/favorite',put({episodeId:'unknown',enabled:true})),db,a)).status,404);
+ const position=(seconds,generation)=>({episodeId:'ep',positionSeconds:seconds,writerId:'writer-1234567890',sequence:1,historyGeneration:generation});
+ assert.equal((await accountApi(request('/api/account/history',put(position(10,0))),db,a)).status,200);
+ assert.equal((await accountApi(request('/api/account/history',put(position(20,0),'https://radio.example','tag-b')),db,b)).status,200);
+ assert.equal((await accountApi(request('/api/account/history',{method:'DELETE',headers:{Origin:'https://radio.example','X-Account-Session':'tag-a'}}),db,a)).status,200);
+ const after=await (await accountApi(request('/api/account'),db,a)).json();assert.equal(after.historyGeneration,1);assert.deepEqual(after.history,[]);
+ assert.equal((await accountApi(request('/api/account/history',put(position(5,0))),db,a)).status,409);
+ assert.equal((await (await accountApi(request('/api/account'),db,a)).json()).history.length,0);
+ assert.equal((await (await accountApi(request('/api/account'),db,b)).json()).history[0].position_seconds,20);
+ assert.equal((await accountApi(request('/api/account/history',put(position(25,1))),db,a)).status,200);
+ assert.equal((await (await accountApi(request('/api/account'),db,a)).json()).history[0].position_seconds,25);
  sql.close();
 });
 
