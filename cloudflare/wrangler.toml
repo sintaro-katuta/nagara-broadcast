@@ -11,6 +11,7 @@ PASSKEY_API_ENABLED = "false"
 PASSKEY_ADD_ENABLED = "false"
 AUTH_NOTICES_ENABLED = "false"
 AUTH_CLEANUP_ENABLED = "true"
+POSITION_CURSOR_CLEANUP_ENABLED = "false"
 
 [triggers]
 crons = ["0 * * * *", "*/5 * * * *"]

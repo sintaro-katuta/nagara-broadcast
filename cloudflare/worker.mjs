@@ -4,7 +4,7 @@ import {episodeTitle} from '../public/programs.js';
 import {accountApi} from './account-api.mjs';
 import {verifySession,revokeSession} from './sessions.mjs';
 import {makeAuthRoutes} from './auth-routes.mjs';
-import {cleanupExpiredAuth} from './auth-cleanup.mjs';
+import {cleanupExpiredAuth,cleanupOldPositionCursors} from './auth-cleanup.mjs';
 import {deliverRecoveryNotices} from './recovery-notices.mjs';
 import {makeResendEmail,getResendUsage} from './resend-email.mjs';
 import {makeAccountDeletion} from './account-deletion.mjs';
@@ -29,6 +29,10 @@ export default {
   if(controller.cron==='0 * * * *'&&env.AUTH_CLEANUP_ENABLED==='true'){
    const removed=await cleanupExpiredAuth(env.DB,controller.scheduledTime);
    console.log('Expired auth cleanup',JSON.stringify(removed));
+   if(env.POSITION_CURSOR_CLEANUP_ENABLED==='true'){
+    const cursors=await cleanupOldPositionCursors(env.DB,controller.scheduledTime);
+    console.log('Expired position cursors',cursors);
+   }
   }
   if(controller.cron==='*/5 * * * *'&&env.AUTH_NOTICES_ENABLED==='true'){
    const value=env.AUTH_ENCRYPTION_KEY;if(typeof value!=='string'||!/^[a-f0-9]{64}$/i.test(value))throw new Error('Notification configuration unavailable');
