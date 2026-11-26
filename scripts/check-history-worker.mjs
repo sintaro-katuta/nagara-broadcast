@@ -1,6 +1,6 @@
 import {readFile} from 'node:fs/promises';
 import assert from 'node:assert/strict';
-import {createHash,generateKeyPairSync,sign} from 'node:crypto';
+import {createHash,generateKeyPairSync,sign,randomBytes} from 'node:crypto';
 import {adminBootstrapCode,approveAdminRecovery,bootstrapFirstAdmin} from '../cloudflare/admin-bootstrap.mjs';
 const state=JSON.parse(await readFile('/tmp/nagara-history-state.json','utf8'));
 if(!/^nagara-history-check-[a-f0-9]{32}$/.test(state.worker)||!/^[a-f0-9]{64}$/.test(state.access)||!Array.isArray(state.sessions)||state.sessions.length!==2||!state.sessions.every(x=>/^[a-f0-9]{64}$/.test(x)))throw new Error('Invalid temporary resource state');
@@ -65,3 +65,33 @@ const setupCode=await post('/api/account/admin-setup-code',{},newSession,account
 assert.equal(await bootstrapFirstAdmin(d1db,setup.code),true);assert.equal(await bootstrapFirstAdmin(d1db,setup.code),false);
 assert.equal((await (await fetchReady(origin+'/__test/count',{headers:{'X-Test-Access':state.access}})).json()).admins,1);
 console.log('Real Cloudflare Worker and D1: signed-in administrator setup code and one-time role assignment verified.');
+
+// Start with a real verified session, revoke it after identity lookup and
+// verify that the account API refuses the subsequent D1 write.
+b=await read(1);
+const revoked=await call('/__test/revoke-during-write','PUT',1,{episodeId:'test-ep',enabled:true},b.sessionTag);
+assert.equal(revoked.status,409);
+assert.equal((await d1('/query','POST',{sql:"SELECT COUNT(*) AS n FROM favorites WHERE account_id='synthetic-b'",params:[]}))[0].results[0].n,0);
+assert.equal((await call('/api/account','GET',1)).status,401);
+console.log('Real Cloudflare Worker and D1: revoked session cannot finish a favorite write.');
+
+// Use an artificial email token and a synthetic WebAuthn registration. No
+// provider or real mailbox is contacted in this isolated test.
+const recoveryToken=randomBytes(32).toString('hex');
+await d1('/query','POST',{sql:'INSERT INTO recovery_tokens VALUES (?,?,?,?)',params:[hash(recoveryToken).toString('hex'),'synthetic-a','recover_account',Math.floor(Date.now()/1000)+600]});
+const confirmed=await post('/api/auth/recovery/confirm',{token:recoveryToken},'');assert.equal(confirmed.status,200);
+const recoveryCookie=cookieOf(confirmed,'__Host-nagara_recovery');
+const recoveryOptionsResponse=await post('/api/auth/recovery/options',{},recoveryCookie);assert.equal(recoveryOptionsResponse.status,200);
+const recoveryOptions=await recoveryOptionsResponse.json(),recoveryPair=generateKeyPairSync('ec',{namedCurve:'prime256v1'}),recoveryJwk=recoveryPair.publicKey.export({format:'jwk'}),recoveryId=Buffer.from('recovered-key');
+const recoveryCose=Buffer.concat([Buffer.from('a5010203262001215820','hex'),Buffer.from(recoveryJwk.x,'base64url'),Buffer.from('225820','hex'),Buffer.from(recoveryJwk.y,'base64url')]);
+const recoveryAuth=Buffer.concat([hash(host),Buffer.from([0x45,0,0,0,0]),Buffer.alloc(16),Buffer.from([0,recoveryId.length]),recoveryId,recoveryCose]);
+const recoveryAtt=Buffer.concat([Buffer.from('a363666d74646e6f6e656761747453746d74a068617574684461746158','hex'),Buffer.from([recoveryAuth.length]),recoveryAuth]);
+const recoveryClient=Buffer.from(JSON.stringify({type:'webauthn.create',challenge:recoveryOptions.challenge,origin,crossOrigin:false}));
+const recoveryRegistration={id:recoveryId.toString('base64url'),rawId:recoveryId.toString('base64url'),type:'public-key',clientExtensionResults:{},response:{clientDataJSON:recoveryClient.toString('base64url'),attestationObject:recoveryAtt.toString('base64url'),transports:['internal']}};
+const recoveryFinish=await post('/api/auth/recovery/finish',recoveryRegistration,recoveryCookie);assert.equal(recoveryFinish.status,200);
+const keys=(await d1('/query','POST',{sql:"SELECT credential_id FROM passkeys WHERE account_id='synthetic-a'",params:[]}))[0].results;
+assert.deepEqual(keys.map(x=>x.credential_id),[recoveryId.toString('base64url')]);
+assert.equal((await call('/api/account','GET',0)).status,401);
+assert.equal((await fetchReady(origin+'/api/account',{headers:{Cookie:cookieOf(recoveryFinish,'__Host-nagara_session'),'X-Test-Access':state.access}})).status,200);
+assert.equal((await d1('/query','POST',{sql:"SELECT COUNT(*) AS n FROM recovery_notice_outbox WHERE account_id='synthetic-a'",params:[]}))[0].results[0].n,2);
+console.log('Real Cloudflare Worker and D1: regular recovery replaces old keys and sessions without sending email.');
