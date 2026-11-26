@@ -55,7 +55,7 @@ export function makeAccountUI({onSession,onNotice}){
  if(typeof window.addEventListener==='function')window.addEventListener('online',changedElsewhere);
  function init(){
   if(initializing)return initializing;
-  initializing=(async()=>{try{const response=await fetch('/api/auth/status',{cache:'no-store'});if(!response.ok)throw new Error('アカウントの状態を確認できませんでした。');enabled=(await response.json()).available===true;if(!enabled){onSession(null,true);return;}await refresh();if(link){show('confirm');message(link.kind==='enroll'?'登録を続けるには、メールアドレスを確認してください。':'復旧を続けるには、メールアドレスを確認してください。');if(!dialog.open)dialog.showModal();}}catch{enabled=false;}})().finally(()=>{initializing=null;});
+  initializing=(async()=>{try{const response=await fetch('/api/auth/status',{cache:'no-store'});if(!response.ok)throw new Error('アカウントの状態を確認できませんでした。');const status=await response.json();enabled=status.available===true;if($('account-add-passkey-section'))$('account-add-passkey-section').hidden=!enabled||status.passkeyAddAvailable!==true;if(!enabled){onSession(null,true);return;}await refresh();if(link){show('confirm');message(link.kind==='enroll'?'登録を続けるには、メールアドレスを確認してください。':'復旧を続けるには、メールアドレスを確認してください。');if(!dialog.open)dialog.showModal();}}catch{enabled=false;}})().finally(()=>{initializing=null;});
   return initializing;
  }
  async function action(fn){if(busy)return;setBusy(true);try{await fn();}catch(error){message(error?.code==='ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED'?'このパスキーは登録済みです。登録済みのパスキーでログインするか、復旧には別のパスキーの保存先を選んでください。':error?.name==='NotAllowedError'?'操作がキャンセルされました。もう一度お試しください。':error?.message||'操作できませんでした。もう一度お試しください。');}finally{setBusy(false);}}
@@ -64,7 +64,7 @@ export function makeAccountUI({onSession,onNotice}){
   if(!isAdmin||!sessionTag||!adminPanel)return;
   const version=stateVersion,tag=sessionTag;adminPanel.hidden=false;
   const retry=$('account-admin-retry'),help=$('account-admin-retry-help');if(retry)retry.hidden=true;if(help)help.hidden=true;
-  $('account-admin-storage').textContent='音声の情報を読み込んでいます。';$('account-admin-mail').textContent='メールの使用状況を読み込んでいます。';$('account-admin-notices').textContent='復旧通知の状態を読み込んでいます。';
+  $('account-admin-storage').textContent='音声の情報を読み込んでいます。';$('account-admin-mail').textContent='メールの使用状況を読み込んでいます。';$('account-admin-notices').textContent='セキュリティ通知の状態を読み込んでいます。';
   try{
    const response=await fetch('/api/admin/usage',{headers:{'X-Account-Session':tag},credentials:'same-origin',cache:'no-store'});
    if(version!==stateVersion||tag!==sessionTag)return;
@@ -73,7 +73,7 @@ export function makeAccountUI({onSession,onNotice}){
    $('account-admin-storage').textContent=`登録済み音声：${result.storage.count.toLocaleString()}本・${(result.storage.bytes/1e9).toFixed(2)} GB`;
    const show=part=>`${part.used.toLocaleString()} / ${part.limit===null?'上限なし':part.limit.toLocaleString()}通（更新 ${new Date(part.resetsAt).toLocaleString('ja-JP')}）`;
    $('account-admin-mail').textContent=result.resend?`メール使用数　今日：${show(result.resend.daily)}　今月：${show(result.resend.monthly)}`:'メールの使用状況を取得できません。接続設定を確認してください。';
-   $('account-admin-notices').textContent=result.notices?`復旧通知：送信待ち ${result.notices.waiting.toLocaleString()}件・要確認 ${result.notices.blocked.toLocaleString()}件`:'復旧通知の状態を取得できません。';
+   $('account-admin-notices').textContent=result.notices?`セキュリティ通知：送信待ち ${result.notices.waiting.toLocaleString()}件・要確認 ${result.notices.blocked.toLocaleString()}件`:'セキュリティ通知の状態を取得できません。';
    if(retry)retry.hidden=!result.notices?.blocked;if(help)help.hidden=!result.notices?.blocked;
   }catch{if(version===stateVersion){$('account-admin-storage').textContent='管理情報を取得できませんでした。';$('account-admin-mail').textContent='時間をおいて更新してください。';$('account-admin-notices').textContent='';}}
  }
@@ -97,6 +97,14 @@ export function makeAccountUI({onSession,onNotice}){
  $('account-email-form').onsubmit=event=>{event.preventDefault();action(async()=>{await api(`/api/auth/${mode}/start`,{email:$('account-email').value});$('account-email-form').reset();$('account-email-form').hidden=true;message('手続きできる場合はメールが届きます。受信箱をご確認ください。');});};
  $('account-confirm-button').onclick=()=>action(async()=>{if(!link)throw new Error('リンクを確認できません。メールから開き直してください。');await api(`/api/auth/${link.kind}/confirm`,{token:link.token});mode=link.kind;link=null;show('create');message('この端末で使うパスキーを登録してください。');});
  $('account-create-button').onclick=()=>action(async()=>{const client=await webauthn(),options=await api(`/api/auth/${mode}/options`,{}),response=await client.startRegistration({optionsJSON:options});await api(`/api/auth/${mode}/finish`,response);invalidate();notifyTabs();await refresh();show('signed-in');dialog.close();onNotice('パスキーを登録しました。');});
+ if($('account-add-passkey'))$('account-add-passkey').onclick=()=>action(async()=>{
+  const tag=sessionTag;if(!tag)throw new Error('ログインが必要です。');
+  const headers={'X-Account-Session':tag},check=()=>{if(tag!==(sessionTag||refreshTag))throw new Error('アカウントが変更されました。');};
+  const client=await webauthn(),auth=await api('/api/auth/passkey/register/reauth-options',{},headers);check();
+  const assertion=await client.startAuthentication({optionsJSON:auth});check();await api('/api/auth/passkey/register/reauth-verify',assertion,headers);check();
+  const options=await api('/api/auth/passkey/register/options',{},headers);check();const response=await client.startRegistration({optionsJSON:options});check();
+  await api('/api/auth/passkey/register/verify',response,headers);check();message('パスキーを追加しました。登録済みのメールアドレスにもお知らせします。');onNotice('パスキーを追加しました。');
+ });
  $('account-logout').onclick=()=>action(async()=>{const tag=sessionTag;const response=await fetch('/api/auth/logout',{method:'POST',headers:{'X-Account-Session':tag||''},credentials:'same-origin'});if(response.status===409||response.status===401){changedElsewhere();throw new Error('アカウントが変更されました。');}if(!response.ok)throw new Error('ログアウトできませんでした。');invalidate(true);notifyTabs();show('anonymous');dialog.close();onNotice('ログアウトしました。');});
  const deleteButton=$('account-delete');if(deleteButton)deleteButton.onclick=()=>action(async()=>{
   if(isAdmin)throw new Error('管理者アカウントは削除できません。');

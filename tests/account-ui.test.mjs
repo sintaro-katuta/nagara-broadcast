@@ -2,6 +2,17 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createHistoryWriteGuard,createPositionWriter} from '../public/player-model.js';
 
+test('adding a backup passkey first verifies the existing passkey and keeps the session binding',async()=>{
+ const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout','account-add-passkey','account-add-passkey-section'];
+ const elements=Object.fromEntries(names.map(name=>[name,{hidden:true,disabled:false,textContent:'',focus(){},reset(){}}]));elements['account-dialog'].querySelectorAll=()=>[];
+ globalThis.location={hash:'',pathname:'/',search:''};globalThis.history={state:null,replaceState(){}};globalThis.BroadcastChannel=undefined;
+ const actions=[];globalThis.window={SimpleWebAuthnBrowser:{async startAuthentication(){actions.push('authenticate');return {id:'existing'}},async startRegistration(){actions.push('register');return {id:'new'}}}};
+ globalThis.document={getElementById:id=>elements[id],addEventListener(){},createElement:()=>({}),head:{append(script){queueMicrotask(()=>script.onload())}}};
+ const calls=[];globalThis.fetch=async(path,options={})=>{if(path==='/api/auth/status')return Response.json({available:true,passkeyAddAvailable:true});if(path==='/api/account')return Response.json({favorites:[],history:[],historyGeneration:0,sessionTag:'a'.repeat(64)});calls.push(path);assert.equal(options.headers['X-Account-Session'],'a'.repeat(64));return Response.json({challenge:'test'});};
+ const {makeAccountUI}=await import('../public/account-ui.js?test=add-passkey');const ui=makeAccountUI({onSession(){},onNotice(){}});await ui.init();assert.equal(elements['account-add-passkey-section'].hidden,false);await elements['account-add-passkey'].onclick();
+ assert.deepEqual(actions,['authenticate','register']);assert.deepEqual(calls,['/api/auth/passkey/register/reauth-options','/api/auth/passkey/register/reauth-verify','/api/auth/passkey/register/options','/api/auth/passkey/register/verify']);assert.match(elements['account-message'].textContent,/追加しました/);
+});
+
 test('a paused tab cannot restore deleted history after receiving a new generation',async()=>{
  const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout'];
  const elements=Object.fromEntries(names.map(name=>[name,{hidden:false,disabled:false,textContent:'',focus(){},reset(){}}]));elements['account-dialog'].querySelectorAll=()=>[];

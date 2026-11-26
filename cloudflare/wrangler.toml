@@ -8,6 +8,7 @@ AUTH_ORIGIN = "https://nagara-broadcast.sintaro-katuta.com"
 AUTH_EMAIL_FROM = "no-reply@mail.nagara-broadcast.sintaro-katuta.com"
 AUTH_ENABLED = "false"
 PASSKEY_API_ENABLED = "false"
+PASSKEY_ADD_ENABLED = "false"
 AUTH_NOTICES_ENABLED = "false"
 AUTH_CLEANUP_ENABLED = "true"
 

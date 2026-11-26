@@ -16,7 +16,10 @@ export async function deliverRecoveryNotices(db,binding,from,encryptionKey,now=D
    const email=await db.prepare('SELECT email_ciphertext FROM recovery_emails WHERE account_id=?').bind(row.account_id).first();
    if(!email)throw new Error('recovery address unavailable');
    const to=await decryptEmail(email.email_ciphertext,row.account_id,encryptionKey);
-   await binding.send({from:sender,to,subject:'ながら放送 アカウント復旧のお知らせ',text:`ながら放送のアカウントで、メールによる復旧と新しいパスキーの登録が完了しました。\n\n復旧日時（UTC）: ${new Date(row.created_at*1000).toISOString()}\n\n心当たりがない場合は、メールアカウントの安全を確認し、サービス管理者へご連絡ください。`},{idempotencyKey:`recovery-notice/${row.id}`});
+   const added=row.id.startsWith('passkey-add:');
+   const subject=added?'ながら放送 パスキー追加のお知らせ':'ながら放送 アカウント復旧のお知らせ';
+   const text=added?`ながら放送のアカウントに、新しいパスキーが追加されました。\n\n追加日時（UTC）: ${new Date(row.created_at*1000).toISOString()}\n\n心当たりがない場合は、メールアカウントの安全を確認し、サービス管理者へご連絡ください。`:`ながら放送のアカウントで、メールによる復旧と新しいパスキーの登録が完了しました。\n\n復旧日時（UTC）: ${new Date(row.created_at*1000).toISOString()}\n\n心当たりがない場合は、メールアカウントの安全を確認し、サービス管理者へご連絡ください。`;
+   await binding.send({from:sender,to,subject,text},{idempotencyKey:`recovery-notice/${row.id}`});
   }catch(error){
    if(error instanceof ResendDeliveryError&&!error.retryable){
     await db.prepare('UPDATE recovery_notice_outbox SET lease_token=NULL,lease_until=0,blocked_at=?,blocked_reason=? WHERE id=? AND lease_token=?').bind(seconds,`http_${error.status}`,row.id,lease).run();

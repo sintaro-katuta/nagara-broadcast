@@ -1,12 +1,13 @@
 import {makePasskeyLogin} from './passkey-login.mjs';
 import {makeEnrollment} from './passkey-enrollment.mjs';
 import {makeRecovery} from './passkey-recovery.mjs';
+import {makePasskeyRegistration} from './passkey-registration.mjs';
 import {sendEnrollmentEmail} from './enrollment-email.mjs';
 import {sendRecoveryEmail} from './recovery-email.mjs';
 import {normalizeEmail} from './recovery-crypto.mjs';
 import {rateLimitKey,consumeRateLimit} from './auth-rate-limit.mjs';
 
-const paths=new Set(['/api/auth/passkey/options','/api/auth/passkey/verify','/api/auth/enroll/start','/api/auth/enroll/confirm','/api/auth/enroll/options','/api/auth/enroll/finish','/api/auth/recovery/start','/api/auth/recovery/confirm','/api/auth/recovery/options','/api/auth/recovery/finish']);
+const paths=new Set(['/api/auth/passkey/options','/api/auth/passkey/verify','/api/auth/passkey/register/reauth-options','/api/auth/passkey/register/reauth-verify','/api/auth/passkey/register/options','/api/auth/passkey/register/verify','/api/auth/enroll/start','/api/auth/enroll/confirm','/api/auth/enroll/options','/api/auth/enroll/finish','/api/auth/recovery/start','/api/auth/recovery/confirm','/api/auth/recovery/options','/api/auth/recovery/finish']);
 const names={enroll:'__Host-nagara_enroll',recovery:'__Host-nagara_recovery'};
 const cookie=(name,value,age)=>`${name}=${value}; Path=/; Max-Age=${age}; Secure; HttpOnly; SameSite=Strict`;
 const json=(value,status=200,c)=>Response.json(value,{status,headers:{'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff',...(c?{'Set-Cookie':c}:{})}});
@@ -22,7 +23,7 @@ async function body(request){
 
 // Not routed to production until the feature flag and release prerequisites
 // (including notifications, cleanup and real-service tests) are complete.
-export function makeAuthRoutes({login=makePasskeyLogin(),enrollment=makeEnrollment(),recovery=makeRecovery(),sendEnroll=sendEnrollmentEmail,sendRecovery=sendRecoveryEmail}={}){
+export function makeAuthRoutes({login=makePasskeyLogin(),registration=makePasskeyRegistration(),enrollment=makeEnrollment(),recovery=makeRecovery(),sendEnroll=sendEnrollmentEmail,sendRecovery=sendRecoveryEmail}={}){
  return async function authRoutes(request,env,ctx){
   const url=new URL(request.url),path=url.pathname;if(!paths.has(path))return null;
   if(request.method!=='POST')return json({error:'許可されていない操作です。'},405);
@@ -34,6 +35,10 @@ export function makeAuthRoutes({login=makePasskeyLogin(),enrollment=makeEnrollme
    const client=await rateLimitKey(rateKey,'client',ip),limit=await consumeRateLimit(env.DB,client,60,300);
    if(!limit.allowed)return json({error:'時間をおいてもう一度お試しください。'},429);
    if(path==='/api/auth/passkey/options'||path==='/api/auth/passkey/verify')return login(request,env);
+   if(path.startsWith('/api/auth/passkey/register/')){
+    try{if(env.PASSKEY_ADD_ENABLED!=='true'||env.AUTH_NOTICES_ENABLED!=='true'||typeof env.EMAIL?.send!=='function')throw new Error();normalizeEmail(env.AUTH_EMAIL_FROM);key(env.AUTH_ENCRYPTION_KEY);}catch{return json({error:'パスキー追加は準備中です。'},503);}
+    return await registration(request,env);
+   }
    const type=path.includes('/enroll/')?'enroll':'recovery',service=type==='enroll'?enrollment:recovery;
    const operation=path.slice(path.lastIndexOf('/')+1);
    let data;try{data=await body(request);}catch{return json({error:'データが不正です。'},400);}
