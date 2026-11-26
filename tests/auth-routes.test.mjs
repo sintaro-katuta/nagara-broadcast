@@ -70,6 +70,14 @@ test('backup passkey routes stay disabled until notification configuration is re
  assert.equal((await routes(request(),env)).status,503);assert.equal((await routes(request(),{...env,PASSKEY_ADD_ENABLED:'true',AUTH_NOTICES_ENABLED:'false'})).status,503);
  assert.equal((await routes(request(),{...env,PASSKEY_ADD_ENABLED:'true'})).status,200);assert.equal(called,1);
 });
+test('administrator recovery routes are disabled unless explicitly enabled with notifications',async()=>{
+ const db={prepare(){return {bind(_key,expiry){return {async first(){return {attempts:1,expires_at:expiry}}}}}}};let called=0;
+ const routes=makeAuthRoutes({adminRecovery:{async issue(){called++;return null}}}),origin='https://radio.example';
+ const env={DB:db,AUTH_ORIGIN:origin,AUTH_RATE_KEY:'01'.repeat(32),AUTH_LOOKUP_KEY:'02'.repeat(32),AUTH_ENCRYPTION_KEY:'03'.repeat(32),AUTH_EMAIL_FROM:'sender@example.com',EMAIL:{async send(){}},AUTH_NOTICES_ENABLED:'true'};
+ const request=()=>new Request(origin+'/api/auth/admin-recovery/start',{method:'POST',headers:{Origin:origin,'CF-Connecting-IP':'192.0.2.1','Content-Type':'application/json'},body:JSON.stringify({email:'synthetic@example.com'})});
+ assert.equal((await routes(request(),env)).status,503);assert.equal((await routes(request(),{...env,ADMIN_RECOVERY_ENABLED:'true',AUTH_NOTICES_ENABLED:'false'})).status,503);
+ assert.equal((await routes(request(),{...env,ADMIN_RECOVERY_ENABLED:'true'})).status,200);assert.equal(called,1);
+});
 
 test('public Worker does not expose passkey routes without the release flags',async()=>{
  const request=new Request('https://radio.example/api/auth/enroll/start',{method:'POST',headers:{Origin:'https://radio.example'}});
