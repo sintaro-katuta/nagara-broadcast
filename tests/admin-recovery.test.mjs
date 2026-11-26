@@ -20,6 +20,9 @@ test('admin recovery needs verified email and browser-specific operator approval
  const issued=await recovery.issue(db,email,lookupKey,encryptionKey);assert.equal(issued.to,email);const confirmed=await recovery.confirm(db,issued.token);assert.ok(confirmed);assert.equal(await recovery.confirm(db,issued.token),null);
  assert.deepEqual(await recovery.status(db,confirmed.browserToken),{approvalCode:confirmed.approvalCode});
  assert.equal(await recovery.options(db,confirmed.browserToken,'https://radio.example'),null);
+ sql.prepare('UPDATE passkey_recovery_attempts SET challenge=?,challenge_expires_at=? WHERE account_id=?').run('c'.repeat(43),now+300,id);
+ assert.equal(await recovery.options(db,confirmed.browserToken,'https://radio.example'),null);assert.equal(await recovery.finish(db,confirmed.browserToken,'https://radio.example',{valid:true}),null);
+ sql.prepare('UPDATE passkey_recovery_attempts SET challenge=NULL,challenge_expires_at=NULL WHERE account_id=?').run(id);
  const accountCode=await adminBootstrapCode(id);assert.equal(await approveAdminRecovery(db,accountCode,'f'.repeat(64),now*1000),false);
  assert.equal(await approveAdminRecovery(db,accountCode,confirmed.approvalCode,now*1000),true);assert.equal(await approveAdminRecovery(db,accountCode,confirmed.approvalCode,now*1000),false);
  assert.ok(await recovery.options(db,confirmed.browserToken,'https://radio.example'));demoteDuringVerification=true;assert.equal(await recovery.finish(db,confirmed.browserToken,'https://radio.example',{valid:true}),null);

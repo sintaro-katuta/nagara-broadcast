@@ -34,16 +34,16 @@ export function makeAdminRecovery({options=registrationOptions,verify=verifyRegi
   async cancel(db,browserToken){if(!valid(browserToken))return;await db.prepare('DELETE FROM passkey_recovery_attempts WHERE browser_token_hash=?').bind(await digest(browserToken)).run();},
   async options(db,browserToken,origin){
    if(!valid(browserToken))return null;const key=await digest(browserToken),now=clock();
-   const row=await db.prepare('SELECT r.account_id,r.challenge FROM passkey_recovery_attempts r WHERE r.browser_token_hash=? AND r.challenge IS NOT NULL AND r.expires_at>? AND r.challenge_expires_at>? AND EXISTS (SELECT 1 FROM account_admins a WHERE a.account_id=r.account_id)').bind(key,now,now).first();if(!row)return null;
+   const row=await db.prepare("SELECT r.account_id,r.challenge FROM passkey_recovery_attempts r WHERE r.browser_token_hash=? AND (r.challenge='approved' OR r.challenge LIKE 'admin:%') AND r.expires_at>? AND r.challenge_expires_at>? AND EXISTS (SELECT 1 FROM account_admins a WHERE a.account_id=r.account_id)").bind(key,now,now).first();if(!row)return null;
    const {results}=await db.prepare('SELECT credential_id FROM passkeys WHERE account_id=? LIMIT 21').bind(row.account_id).all();
    const value=await options(origin,row.account_id,results.map(x=>x.credential_id)),current=clock();
-   const updated=await db.prepare('UPDATE passkey_recovery_attempts SET challenge=? WHERE browser_token_hash=? AND challenge=? AND expires_at>? AND challenge_expires_at>? AND EXISTS (SELECT 1 FROM account_admins WHERE account_id=passkey_recovery_attempts.account_id) RETURNING account_id').bind(value.challenge,key,row.challenge,current,current).first();
+   const updated=await db.prepare("UPDATE passkey_recovery_attempts SET challenge='admin:'||? WHERE browser_token_hash=? AND challenge=? AND expires_at>? AND challenge_expires_at>? AND EXISTS (SELECT 1 FROM account_admins WHERE account_id=passkey_recovery_attempts.account_id) RETURNING account_id").bind(value.challenge,key,row.challenge,current,current).first();
    return updated?value:null;
   },
   async finish(db,browserToken,origin,response){
    if(!valid(browserToken))return null;const key=await digest(browserToken),now=clock();
-   const row=await db.prepare("SELECT account_id,challenge FROM passkey_recovery_attempts WHERE browser_token_hash=? AND challenge IS NOT NULL AND challenge<>'approved' AND expires_at>? AND challenge_expires_at>? AND EXISTS (SELECT 1 FROM account_admins WHERE account_id=passkey_recovery_attempts.account_id)").bind(key,now,now).first();if(!row)return null;
-   let result;try{result=await verify(origin,row.challenge,response);}catch{return null;}
+   const row=await db.prepare("SELECT account_id,challenge FROM passkey_recovery_attempts WHERE browser_token_hash=? AND challenge LIKE 'admin:%' AND expires_at>? AND challenge_expires_at>? AND EXISTS (SELECT 1 FROM account_admins WHERE account_id=passkey_recovery_attempts.account_id)").bind(key,now,now).first();if(!row)return null;
+   let result;try{result=await verify(origin,row.challenge.slice(6),response);}catch{return null;}
    const credential=result?.verified&&result.registrationInfo?.credential;
    if(!credential||typeof credential.id!=='string'||!/^[A-Za-z0-9_-]{1,2048}$/.test(credential.id)||!(credential.publicKey instanceof Uint8Array)||!Number.isSafeInteger(credential.counter)||credential.counter<0)return null;
    const current=clock(),claim=await db.prepare('UPDATE passkey_recovery_attempts SET challenge=NULL,challenge_expires_at=NULL WHERE browser_token_hash=? AND challenge=? AND expires_at>? AND challenge_expires_at>? RETURNING account_id').bind(key,row.challenge,current,current).first();if(!claim)return null;
