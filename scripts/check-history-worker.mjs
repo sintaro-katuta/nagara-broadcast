@@ -1,6 +1,7 @@
 import {readFile} from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import {createHash,generateKeyPairSync,sign} from 'node:crypto';
+import {adminBootstrapCode,approveAdminRecovery} from '../cloudflare/admin-bootstrap.mjs';
 const state=JSON.parse(await readFile('/tmp/nagara-history-state.json','utf8'));
 if(!/^nagara-history-check-[a-f0-9]{32}$/.test(state.worker)||!/^[a-f0-9]{64}$/.test(state.access)||!Array.isArray(state.sessions)||state.sessions.length!==2||!state.sessions.every(x=>/^[a-f0-9]{64}$/.test(x)))throw new Error('Invalid temporary resource state');
 const origin=`https://${state.worker}.sintaro-katuta.workers.dev`;
@@ -37,3 +38,21 @@ const registration={id:id.toString('base64url'),rawId:id.toString('base64url'),t
 assert.equal((await post('/api/auth/passkey/register/verify',registration,sessionCookie+'; '+addCookie,a.sessionTag)).status,200);
 const counts=await (await fetchReady(origin+'/__test/count',{headers:{'X-Test-Access':state.access}})).json();assert.equal(counts.passkeys,2);assert.equal(counts.notices,1);
 console.log('Real Cloudflare Worker and D1: signed reauthentication, backup registration and notification enqueue verified without sending email.');
+if(!/^[a-f0-9-]{36}$/.test(state.adminId||'')||!/^[a-f0-9]{64}$/.test(state.adminToken||'')||!/^nagara-history-check-db-[a-f0-9]{32}$/.test(state.name||'')||!/^[-a-f0-9]{36}$/i.test(state.id||''))throw new Error('Invalid synthetic admin state');
+const adminConfirm=await post('/api/auth/admin-recovery/confirm',{token:state.adminToken},'');assert.equal(adminConfirm.status,200);
+const adminCookie=cookieOf(adminConfirm,'__Host-nagara_admin_recovery'),adminBody=await adminConfirm.json();assert.equal((await post('/api/auth/admin-recovery/options',{},adminCookie)).status,409);
+const cloudAccount=process.env.CLOUDFLARE_ACCOUNT_ID,d1Token=process.env.CLOUDFLARE_D1_WRITE_TOKEN;if(!/^[a-f0-9]{32}$/i.test(cloudAccount||'')||!d1Token)throw new Error('Missing isolated D1 test configuration');
+const base=`https://api.cloudflare.com/client/v4/accounts/${cloudAccount}/d1/database/${state.id}`;
+async function d1(path,method,body){const res=await fetch(base+path,{method,headers:{Authorization:`Bearer ${d1Token}`,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(15000)});const value=await res.json();if(!res.ok||!value.success)throw new Error('Synthetic D1 request failed');return value.result;}
+const detail=await d1('','GET');if(detail.uuid!==state.id||detail.name!==state.name)throw new Error('Unexpected synthetic D1');
+const d1db={prepare(sql){return {bind(...params){return {async first(){const result=await d1('/query','POST',{sql,params});return result[0]?.results?.[0]||null}}}}}};
+const accountCode=await adminBootstrapCode(state.adminId);assert.equal(await approveAdminRecovery(d1db,accountCode,'f'.repeat(64)),false);assert.equal(await approveAdminRecovery(d1db,accountCode,adminBody.approvalCode),true);assert.equal(await approveAdminRecovery(d1db,accountCode,adminBody.approvalCode),false);
+const adminOptionsRes=await post('/api/auth/admin-recovery/options',{},adminCookie);assert.equal(adminOptionsRes.status,200);const adminOptions=await adminOptionsRes.json(),newPair=generateKeyPairSync('ec',{namedCurve:'prime256v1'}),newJwk=newPair.publicKey.export({format:'jwk'}),newId=Buffer.from('new-admin');
+const newCose=Buffer.concat([Buffer.from('a5010203262001215820','hex'),Buffer.from(newJwk.x,'base64url'),Buffer.from('225820','hex'),Buffer.from(newJwk.y,'base64url')]);
+const newAuth=Buffer.concat([hash(host),Buffer.from([0x45,0,0,0,0]),Buffer.alloc(16),Buffer.from([0,newId.length]),newId,newCose]);
+const newAtt=Buffer.concat([Buffer.from('a363666d74646e6f6e656761747453746d74a068617574684461746158','hex'),Buffer.from([newAuth.length]),newAuth]);
+const newClient=Buffer.from(JSON.stringify({type:'webauthn.create',challenge:adminOptions.challenge,origin,crossOrigin:false}));
+const adminRegistration={id:newId.toString('base64url'),rawId:newId.toString('base64url'),type:'public-key',clientExtensionResults:{},response:{clientDataJSON:newClient.toString('base64url'),attestationObject:newAtt.toString('base64url'),transports:['internal']}};
+const adminFinish=await post('/api/auth/admin-recovery/finish',adminRegistration,adminCookie);assert.equal(adminFinish.status,200);assert.match(adminFinish.headers.get('Set-Cookie'),/__Host-nagara_session=/);
+const after=await (await fetchReady(origin+'/__test/count',{headers:{'X-Test-Access':state.access}})).json();assert.equal(after.adminKeys,1);assert.equal(after.oldAdminKeys,0);assert.equal(after.admins,1);assert.equal(after.adminNotices,1);assert.equal(after.oldSessions,0);
+console.log('Real Cloudflare Worker and D1: browser-bound administrator recovery, credential replacement and notification enqueue verified without sending email.');

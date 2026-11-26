@@ -16,7 +16,13 @@ const expires=Math.floor(Date.now()/1000)+600;for(let i=0;i<2;i++)await sql('INS
 const pair=generateKeyPairSync('ec',{namedCurve:'prime256v1'}),jwk=pair.publicKey.export({format:'jwk'}),cose=Buffer.concat([Buffer.from('a5010203262001215820','hex'),Buffer.from(jwk.x,'base64url'),Buffer.from('225820','hex'),Buffer.from(jwk.y,'base64url')]);
 await sql('INSERT INTO passkeys VALUES (?,?,?,?,?,?)',[Buffer.from('original').toString('base64url'),'synthetic-a',Array.from(cose),0,'[]','2026-01-01']);
 await sql("INSERT INTO recovery_emails VALUES ('synthetic-a','test-lookup','not-a-real-email','2026-01-01')");
-await writeFile('/tmp/nagara-history-state.json',JSON.stringify({worker,name,id,access,sessions,privateKey:pair.privateKey.export({format:'pem',type:'pkcs8'})}),{mode:0o600});
+const adminId=randomUUID(),adminToken=randomBytes(32).toString('hex');
+await sql('INSERT INTO accounts VALUES (?)',[adminId]);await sql('INSERT INTO account_admins VALUES (?)',[adminId]);
+await sql('INSERT INTO recovery_emails VALUES (?,?,?,?)',[adminId,'synthetic-admin-lookup','not-a-real-email','2026-01-01']);
+await sql('INSERT INTO passkeys VALUES (?,?,?,?,?,?)',['old-admin-key',adminId,[1],0,'[]','2026-01-01']);
+await sql('INSERT INTO account_sessions VALUES (?,?,?)',['synthetic-old-admin-session',adminId,expires]);
+await sql('INSERT INTO recovery_tokens VALUES (?,?,?,?)',[hash(adminToken),adminId,'recover_account',expires]);
+await writeFile('/tmp/nagara-history-state.json',JSON.stringify({worker,name,id,access,sessions,adminId,adminToken,privateKey:pair.privateKey.export({format:'pem',type:'pkcs8'})}),{mode:0o600});
 const origin=`https://${worker}.sintaro-katuta.workers.dev`;
-const config={name:worker,main:fileURLToPath(new URL('./history-test-worker.mjs',import.meta.url)),compatibility_date:'2026-10-20',workers_dev:true,vars:{TEST_HASH:hash(access),AUTH_ENABLED:'true',PASSKEY_API_ENABLED:'true',PASSKEY_ADD_ENABLED:'true',AUTH_NOTICES_ENABLED:'true',AUTH_ORIGIN:origin,AUTH_RATE_KEY:'01'.repeat(32),AUTH_LOOKUP_KEY:'02'.repeat(32),AUTH_ENCRYPTION_KEY:'03'.repeat(32),AUTH_EMAIL_FROM:'no-reply@example.com',RESEND_API_KEY:'re_test_synthetic_12345'},d1_databases:[{binding:'DB',database_name:name,database_id:id}]};
+const config={name:worker,main:fileURLToPath(new URL('./history-test-worker.mjs',import.meta.url)),compatibility_date:'2026-10-20',workers_dev:true,vars:{TEST_HASH:hash(access),TEST_ADMIN_ID:adminId,AUTH_ENABLED:'true',PASSKEY_API_ENABLED:'true',PASSKEY_ADD_ENABLED:'true',ADMIN_RECOVERY_ENABLED:'true',AUTH_NOTICES_ENABLED:'true',AUTH_ORIGIN:origin,AUTH_RATE_KEY:'01'.repeat(32),AUTH_LOOKUP_KEY:'02'.repeat(32),AUTH_ENCRYPTION_KEY:'03'.repeat(32),AUTH_EMAIL_FROM:'no-reply@example.com',RESEND_API_KEY:'re_test_synthetic_12345'},d1_databases:[{binding:'DB',database_name:name,database_id:id}]};
 await writeFile('/tmp/nagara-history-config.json',JSON.stringify(config),{mode:0o600});console.log('Temporary history test Worker and D1 prepared.');

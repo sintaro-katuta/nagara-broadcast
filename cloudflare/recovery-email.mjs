@@ -9,3 +9,10 @@ export async function sendRecoveryEmail(binding,{origin,from,to,token}){
  const sender=normalizeEmail(from),recipient=normalizeEmail(to),link=`${origin}/#recover-account=${token}`;
  await binding.send({from:sender,to:recipient,subject:'ながら放送 アカウント復旧のご案内',text:`パスキーを再登録するには、次のリンクを開いてください。\n\n${link}\n\nこのリンクは15分間有効です。心当たりがない場合は、このメールを無視してください。`});
 }
+
+export async function sendAdminRecoveryEmail(binding,{origin,from,to,token}){
+ const url=new URL(origin);if(url.protocol!=='https:'||url.origin!==origin||url.username||url.password)throw new TypeError('invalid origin');
+ if(typeof token!=='string'||!/^[a-f0-9]{64}$/.test(token))throw new TypeError('invalid token');
+ const sender=normalizeEmail(from),recipient=normalizeEmail(to),link=`${origin}/#admin-recovery=${token}`;
+ await binding.send({from:sender,to:recipient,subject:'ながら放送 管理者の復旧手続き',text:`管理者のパスキー復旧を始めるには、次のリンクを開いてください。\n\n${link}\n\nリンクは15分間有効です。復旧には、メールの確認に加えて運用者による確認が必要です。心当たりがない場合は、このメールを無視してください。`});
+}
