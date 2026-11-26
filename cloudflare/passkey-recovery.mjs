@@ -12,7 +12,7 @@ const clock=()=>Math.floor(Date.now()/1000);
 
 // Internal service only. Before exposing, callers must enforce rate limits on
 // client and destination, return indistinguishable responses, and send notices.
-export function makeRecovery({options=registrationOptions,verify=verifyRegistration}={}){
+export function makeRecovery({options=registrationOptions,verify=verifyRegistration,clock:currentTime=clock}={}){
  return {
   async issue(db,email,lookupKey,encryptionKey,now=clock()){
    const lookup=await emailLookup(email,lookupKey);
@@ -40,33 +40,37 @@ export function makeRecovery({options=registrationOptions,verify=verifyRegistrat
    const row=await db.prepare('SELECT r.account_id FROM passkey_recovery_attempts r LEFT JOIN account_admins a ON a.account_id=r.account_id WHERE r.browser_token_hash=? AND r.expires_at>? AND a.account_id IS NULL').bind(key,now).first();
    if(!row)return null;
    const {results}=await db.prepare('SELECT credential_id FROM passkeys WHERE account_id=? LIMIT 21').bind(row.account_id).all();
-   if(results.length>=20)return null;
    const value=await options(origin,row.account_id,results.map(x=>x.credential_id));
    const updated=await db.prepare('UPDATE passkey_recovery_attempts SET challenge=?,challenge_expires_at=MIN(expires_at,?) WHERE browser_token_hash=? AND expires_at>? RETURNING account_id').bind(value.challenge,now+300,key,now).first();
    return updated?value:null;
   },
-  async finish(db,browserToken,origin,response,now=clock()){
+  async finish(db,browserToken,origin,response,now){
    if(!valid(browserToken))return null;
+   const time=()=>now===undefined?currentTime():now;
+   const started=time();
    const browserHash=await digest(browserToken);
-   const row=await db.prepare('SELECT account_id,challenge FROM passkey_recovery_attempts WHERE browser_token_hash=? AND challenge IS NOT NULL AND expires_at>? AND challenge_expires_at>?').bind(browserHash,now,now).first();
+   const row=await db.prepare('SELECT account_id,challenge,expires_at,challenge_expires_at FROM passkey_recovery_attempts WHERE browser_token_hash=? AND challenge IS NOT NULL AND expires_at>? AND challenge_expires_at>?').bind(browserHash,started,started).first();
    if(!row)return null;
    const invalidate=()=>db.prepare('UPDATE passkey_recovery_attempts SET challenge=NULL,challenge_expires_at=NULL WHERE browser_token_hash=? AND challenge=?').bind(browserHash,row.challenge).run();
    let result;try{result=await verify(origin,row.challenge,response);}catch{await invalidate();return null;}
    const credential=result.verified&&result.registrationInfo?.credential;
    if(!credential||typeof credential.id!=='string'||!/^[A-Za-z0-9_-]{1,2048}$/.test(credential.id)||!(credential.publicKey instanceof Uint8Array)||!Number.isSafeInteger(credential.counter)||credential.counter<0){await invalidate();return null;}
-   const claim=await db.prepare('UPDATE passkey_recovery_attempts SET challenge=NULL,challenge_expires_at=NULL WHERE browser_token_hash=? AND challenge=? AND expires_at>? AND challenge_expires_at>? RETURNING account_id').bind(browserHash,row.challenge,now,now).first();
+   const verifiedAt=time();
+   const claim=await db.prepare('UPDATE passkey_recovery_attempts SET challenge=NULL,challenge_expires_at=NULL WHERE browser_token_hash=? AND challenge=? AND expires_at>? AND challenge_expires_at>? RETURNING account_id').bind(browserHash,row.challenge,verifiedAt,verifiedAt).first();
    if(!claim)return null;
-   const session=await prepareSession(now*1000);
+   const session=await prepareSession(verifiedAt*1000),commitTime=time();
+   if(row.expires_at<=commitTime||row.challenge_expires_at<=commitTime)return null;
    let changes;
    try{
     changes=await db.batch([
-     db.prepare('INSERT INTO passkeys(credential_id,account_id,public_key,sign_count,transports,created_at) VALUES (CASE WHEN NOT EXISTS (SELECT 1 FROM account_admins WHERE account_id=?) AND (SELECT COUNT(*) FROM passkeys WHERE account_id=?)<20 AND EXISTS (SELECT 1 FROM passkey_recovery_attempts WHERE browser_token_hash=? AND account_id=? AND challenge IS NULL AND expires_at>?) THEN ? ELSE NULL END,?,?,?,?,?) RETURNING credential_id').bind(row.account_id,row.account_id,browserHash,row.account_id,now,credential.id,row.account_id,credential.publicKey,credential.counter,JSON.stringify(credential.transports||[]),new Date(now*1000).toISOString()),
+     db.prepare('INSERT INTO passkeys(credential_id,account_id,public_key,sign_count,transports,created_at) VALUES (CASE WHEN NOT EXISTS (SELECT 1 FROM account_admins WHERE account_id=?) AND EXISTS (SELECT 1 FROM passkey_recovery_attempts WHERE browser_token_hash=? AND account_id=? AND challenge IS NULL AND expires_at>?) THEN ? ELSE NULL END,?,?,?,?,?) RETURNING credential_id').bind(row.account_id,browserHash,row.account_id,commitTime,credential.id,row.account_id,credential.publicKey,credential.counter,JSON.stringify(credential.transports||[]),new Date(commitTime*1000).toISOString()),
      db.prepare('INSERT INTO account_auth_generations(account_id,generation) VALUES (?,1) ON CONFLICT(account_id) DO UPDATE SET generation=generation+1').bind(row.account_id),
      db.prepare('DELETE FROM account_sessions WHERE account_id=?').bind(row.account_id),
+     db.prepare('DELETE FROM passkeys WHERE account_id=? AND credential_id<>?').bind(row.account_id,credential.id),
      db.prepare('DELETE FROM recovery_tokens WHERE account_id=? AND purpose=?').bind(row.account_id,'recover_account'),
      db.prepare('DELETE FROM passkey_recovery_attempts WHERE account_id=?').bind(row.account_id),
      db.prepare('INSERT INTO account_sessions(token_hash,account_id,expires_at) VALUES (?,?,?)').bind(session.tokenHash,row.account_id,session.expiresAt),
-     db.prepare('INSERT INTO recovery_notice_outbox(id,account_id,created_at,next_attempt_at) VALUES (?,?,?,?)').bind(crypto.randomUUID(),row.account_id,now,now)
+     db.prepare('INSERT INTO recovery_notice_outbox(id,account_id,created_at,next_attempt_at) VALUES (?,?,?,?)').bind(crypto.randomUUID(),row.account_id,commitTime,commitTime)
     ]);
    }catch{return null;}
    if(!changes[0]?.results?.length)return null;

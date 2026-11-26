@@ -48,14 +48,20 @@ export function makeAuthRoutes({login=makePasskeyLogin(),registration=makePasske
     let email,lookup,encryption;
     try{email=normalizeEmail(data.email);lookup=key(env.AUTH_LOOKUP_KEY);encryption=key(env.AUTH_ENCRYPTION_KEY);if(env.AUTH_LOOKUP_KEY.toLowerCase()===env.AUTH_ENCRYPTION_KEY.toLowerCase()||env.AUTH_LOOKUP_KEY.toLowerCase()===env.AUTH_RATE_KEY.toLowerCase()||env.AUTH_ENCRYPTION_KEY.toLowerCase()===env.AUTH_RATE_KEY.toLowerCase()||!env.EMAIL||!env.AUTH_EMAIL_FROM)throw new Error();}
     catch{return json({error:'入力内容または設定を確認してください。'},400);}
-    const addressKey=await rateLimitKey(rateKey,'destination',email),addressLimit=await consumeRateLimit(env.DB,addressKey,3,3600);
-    const deliver=async()=>{if(addressLimit.allowed){
+    // Separate pools keep enrollment traffic from consuming the recovery
+    // allowance. These are application caps, not a provider quota guarantee.
+    const addressKey=await rateLimitKey(rateKey,'destination',`${type}\0${email}`),addressLimit=await consumeRateLimit(env.DB,addressKey,3,3600);
+    const senderKey=await rateLimitKey(rateKey,'client',`mail:${type}:${ip}`),senderLimit=await consumeRateLimit(env.DB,senderKey,10,3600);
+    const reserve=async()=>{const poolKey=await rateLimitKey(rateKey,'account',`mail-pool:${type}`);return (await consumeRateLimit(env.DB,poolKey,type==='admin-recovery'?5:type==='recovery'?25:40,86400)).allowed;};
+    const deliver=async()=>{if(addressLimit.allowed&&senderLimit.allowed){
      if(type==='enroll'){
-      const token=await service.begin(env.DB,email,lookup,encryption);
-      try{await sendEnroll(env.EMAIL,{origin:origin.origin,from:env.AUTH_EMAIL_FROM,to:email,token});}catch{console.error('Enrollment email delivery failed');}
+      if(await reserve()){
+       const token=await service.begin(env.DB,email,lookup,encryption);
+       try{await sendEnroll(env.EMAIL,{origin:origin.origin,from:env.AUTH_EMAIL_FROM,to:email,token});}catch{console.error('Enrollment email delivery failed');}
+      }
      }else{
       const result=await service.issue(env.DB,email,lookup,encryption);
-      if(result)try{await (type==='admin-recovery'?sendAdminRecovery:sendRecovery)(env.EMAIL,{origin:origin.origin,from:env.AUTH_EMAIL_FROM,to:result.to,token:result.token});}catch{console.error('Recovery email delivery failed');}
+      if(result&&await reserve())try{await (type==='admin-recovery'?sendAdminRecovery:sendRecovery)(env.EMAIL,{origin:origin.origin,from:env.AUTH_EMAIL_FROM,to:result.to,token:result.token});}catch{console.error('Recovery email delivery failed');}
      }
     }};
     // Account lookup and delivery must not determine when the public response

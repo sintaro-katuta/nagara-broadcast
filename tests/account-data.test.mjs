@@ -9,6 +9,7 @@ test('account data is isolated, bounded and removable', {skip:!sqlite&&'node:sql
  db.exec('PRAGMA foreign_keys=ON');
  db.exec(readFileSync(new URL('../cloudflare/schema.sql',import.meta.url),'utf8'));
  db.exec(readFileSync(new URL('../cloudflare/migrations/0001_account_data.sql',import.meta.url),'utf8'));
+ db.exec(readFileSync(new URL('../cloudflare/migrations/0002_identity_sessions.sql',import.meta.url),'utf8'));
  db.exec(readFileSync(new URL('../cloudflare/migrations/0013_position_write_cursors.sql',import.meta.url),'utf8'));
  db.exec(readFileSync(new URL('../cloudflare/migrations/0018_history_generations.sql',import.meta.url),'utf8'));
  db.exec("INSERT INTO accounts VALUES ('a'),('b'); INSERT INTO episodes VALUES ('ep','title','tech','','',10,3,'2026-01-01','audio/ep')");
