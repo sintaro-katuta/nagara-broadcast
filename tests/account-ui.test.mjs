@@ -1,6 +1,24 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 
+test('clearing history refreshes the session, preserves favorites and notifies other tabs',async()=>{
+ const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout'];
+ const elements=Object.fromEntries(names.map(name=>[name,{hidden:false,disabled:false,textContent:'',focus(){},reset(){}}]));elements['account-dialog'].querySelectorAll=()=>[];
+ globalThis.location={hash:'',pathname:'/',search:''};globalThis.history={state:null,replaceState(){}};globalThis.window={};globalThis.document={getElementById:id=>elements[id],addEventListener(){}};
+ const events=[];globalThis.BroadcastChannel=class{postMessage(value){events.push(value)}};
+ let cleared=false;globalThis.fetch=async(path,options={})=>{if(path==='/api/auth/status')return Response.json({available:true});if(path==='/api/account')return Response.json({favorites:['saved'],history:cleared?[]:[{episode_id:'ep',position_seconds:42}],historyGeneration:cleared?1:0,sessionTag:'a'.repeat(64)});if(path==='/api/account/history'){assert.equal(options.method,'DELETE');assert.equal(options.headers['X-Account-Session'],'a'.repeat(64));cleared=true;return Response.json({ok:true});}throw new Error('unexpected request');};
+ const {makeAccountUI}=await import('../public/account-ui.js?test=clear-history');const sessions=[];const ui=makeAccountUI({onSession:value=>sessions.push(value),onNotice(){}});await ui.init();await ui.clearHistory();
+ assert.deepEqual(sessions.at(-1).history,[]);assert.deepEqual(sessions.at(-1).favorites,['saved']);assert.equal(sessions.at(-1).historyGeneration,1);assert.deepEqual(events,['changed']);
+});
+
+test('a failed history deletion does not claim success or erase the current session',async()=>{
+ const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout'];
+ const elements=Object.fromEntries(names.map(name=>[name,{hidden:false,disabled:false,textContent:'',focus(){},reset(){}}]));elements['account-dialog'].querySelectorAll=()=>[];
+ globalThis.location={hash:'',pathname:'/',search:''};globalThis.history={state:null,replaceState(){}};globalThis.window={};globalThis.document={getElementById:id=>elements[id],addEventListener(){}};globalThis.BroadcastChannel=undefined;
+ globalThis.fetch=async(path)=>path==='/api/auth/status'?Response.json({available:true}):path==='/api/account'?Response.json({favorites:[],history:[{episode_id:'ep'}],historyGeneration:0,sessionTag:'a'.repeat(64)}):new Response(null,{status:500});
+ const {makeAccountUI}=await import('../public/account-ui.js?test=clear-history-failure');const sessions=[];const ui=makeAccountUI({onSession:value=>sessions.push(value),onNotice(){}});await ui.init();await assert.rejects(ui.clearHistory(),/削除できませんでした/);assert.equal(ui.isSignedIn(),true);assert.equal(sessions.at(-1).history.length,1);
+});
+
 test('recovery explains an already registered passkey and permits retry',async()=>{
  const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout'];
  const elements=Object.fromEntries(names.map(name=>[name,{hidden:false,disabled:false,textContent:'',focus(){},reset(){}}]));

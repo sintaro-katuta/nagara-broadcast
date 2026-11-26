@@ -48,7 +48,7 @@ $('theme-select').onchange=()=>{write('yr:appearance',$('theme-select').value);a
 let saved=read('yr:saved',[]),history=read('yr:history',[]),positions=read('yr:positions',{});
 if(!Array.isArray(saved))saved=[];if(!Array.isArray(history))history=[];if(!positions||typeof positions!=='object')positions={};
 let episodes=[],channels=[],view='home',filter='all',programFilter=null,query='',current=null,queue=[],featured=null,selectedFile=null;
-let switching=false,lastPositionWrite=0,toastTimer,automaticTitle='',recentRenderKey='',listRenderKey='',queueRenderKey='';
+let switching=false,lastPositionWrite=0,toastTimer,automaticTitle='',recentRenderKey='',listRenderKey='',queueRenderKey='',historySuppressed=false,historyDeleting=false;
 const audio=$('audio');audio.volume=.8;
 const channel=id=>channels.find(c=>c.id===id);
 const english={tech:'TECH',life:'LIFE',comedy:'OFFBEAT',news:'WORLD'};
@@ -108,6 +108,8 @@ function render(){
  $('saved-count').textContent=saved.filter(id=>episodes.some(e=>e.id===id)).length;
  const recent=history.map(id=>episodes.find(e=>e.id===id)).filter(Boolean).slice(0,5);$('recent-section').hidden=!isHome||!recent.length;const recentKey=recent.map(e=>e.id).join('|');if(recentRenderKey!==recentKey){recentRenderKey=recentKey;$('recent-list').innerHTML=recent.map(e=>`<button class="recent-item ${esc(e.channel)}" data-play="${esc(e.id)}"><span class="recent-cover">${episodeArt(e)}</span><span class="recent-copy"><strong>${esc(episodeTitle(e))}</strong><small>${esc(episodeProgram(e)?.name||channel(e.channel)?.name)}</small></span></button>`).join('');}
  const visible=list();$('episode-count').textContent=visible.length+'本';
+ $('clear-history').hidden=view!=='history'||!history.length||(publicPreview&&!account.isSignedIn());
+ $('clear-history').disabled=historyDeleting;
  $('sort').closest('label').hidden=view==='history';
  $('sort').disabled=view==='history';
  $('sort').title=view==='history'?'最近聴いた順に表示しています':'並び順';
@@ -161,7 +163,15 @@ async function loadCaptions(){
  const id=current?.id;captionEpisode=id;captionCues=[];captionLoading=!!id;renderCaptions();if(!id)return;
  try{const response=await fetch('/api/episodes/'+encodeURIComponent(id)+'/captions');if(response.ok){const cues=await response.json();if(captionEpisode===id&&Array.isArray(cues))captionCues=cues;}}catch{}finally{if(captionEpisode===id){captionLoading=false;renderCaptions();}}
 }
-function persistPosition(){if(!switching&&current&&Number.isFinite(audio.currentTime)){positions[current.id]=audio.ended?0:audio.currentTime;if(publicPreview){syncPosition(current.id,positions[current.id]);}else write('yr:positions',positions);}}
+function persistPosition(){if(!historySuppressed&&!switching&&current&&Number.isFinite(audio.currentTime)){positions[current.id]=audio.ended?0:audio.currentTime;if(publicPreview){syncPosition(current.id,positions[current.id]);}else write('yr:positions',positions);}}
+$('clear-history').onclick=async()=>{
+ if(historyDeleting||!history.length)return;
+ if(!window.confirm('再生履歴と再生位置をすべて削除します。元に戻せません。再生中の場合は一時停止します。続けますか？'))return;
+ historyDeleting=true;historySuppressed=true;audio.pause();render();
+ try{if(publicPreview)await account.clearHistory();else{history=[];positions={};write('yr:history',history);write('yr:positions',positions);}render();toast('再生履歴を削除しました。');}
+ catch(error){toast(error.message||'再生履歴を削除できませんでした。');}
+ finally{historyDeleting=false;render();}
+};
 async function play(id,build=true){
  const ep=episodes.find(e=>e.id===id);if(!ep)return;
  if(current?.id===id){if(!audio.paused){audio.pause();return;}try{await audio.play();}catch{toast('再生できませんでした。もう一度お試しください。');}return;}
@@ -174,12 +184,12 @@ function next(){if(!current)return toast('まずエピソードを選んでく�
 function restoreResume(){if(!switching||!current||audio.readyState<1)return;const resume=resumePosition(positions[current.id],audio.duration,accountReady);if(resume===null)return;if(resume>0)audio.currentTime=resume;switching=false;if(publicPreview&&!audio.paused)syncPosition(current.id,resume);}
 audio.addEventListener('loadedmetadata',()=>{audio.playbackRate=Number($('speed').value);restoreResume();$('total-time').textContent=time(audio.duration);updatePlayer();});
 audio.addEventListener('durationchange',restoreResume);
-audio.addEventListener('play',()=>{if(current&&(!publicPreview||account.isSignedIn())){history=[current.id,...history.filter(id=>id!==current.id)].slice(0,200);if(publicPreview){if(!switching)syncPosition(current.id,audio.currentTime);}else write('yr:history',history);}render();});
+audio.addEventListener('play',()=>{if(historyDeleting){audio.pause();return;}historySuppressed=false;if(current&&(!publicPreview||account.isSignedIn())){history=[current.id,...history.filter(id=>id!==current.id)].slice(0,200);if(publicPreview){if(!switching)syncPosition(current.id,audio.currentTime);}else write('yr:history',history);}render();});
 audio.addEventListener('pause',()=>{persistPosition();render();});
 audio.addEventListener('error',()=>{toast('音声を読み込めませんでした。ファイルを確認してください。');updatePlayer();});
 audio.addEventListener('timeupdate',()=>{if(captionsEnabled)renderCaptions();$('current-time').textContent=time(audio.currentTime);$('total-time').textContent=time(audio.duration);$('seek').value=audio.duration?audio.currentTime/audio.duration*100:0;$('expanded-seek').value=$('seek').value;$('expanded-current').textContent=time(audio.currentTime);$('expanded-total').textContent=time(audio.duration);if(publicPreview){if(Date.now()-lastCloudPosition>30000){persistPosition();lastCloudPosition=Date.now();}}else if(Date.now()-lastPositionWrite>4000){persistPosition();lastPositionWrite=Date.now();}});
-audio.addEventListener('ended',()=>{if(current&&!switching){positions[current.id]=0;if(publicPreview)syncPosition(current.id,0);else write('yr:positions',positions);}render();if($('auto-next').checked)next();});
-window.addEventListener('pagehide',()=>{if(publicPreview){if(!switching&&current&&Number.isFinite(audio.currentTime))syncPosition(current.id,audio.ended?0:audio.currentTime,true);}else persistPosition();});
+audio.addEventListener('ended',()=>{if(!historySuppressed&&current&&!switching){positions[current.id]=0;if(publicPreview)syncPosition(current.id,0);else write('yr:positions',positions);}render();if($('auto-next').checked)next();});
+window.addEventListener('pagehide',()=>{if(publicPreview){if(!historySuppressed&&!switching&&current&&Number.isFinite(audio.currentTime))syncPosition(current.id,audio.ended?0:audio.currentTime,true);}else persistPosition();});
 $('hero-play').onclick=()=>{if(featured)play(featured.id);};$('feature-save').onclick=()=>{if(featured)save(featured.id);};
 $('start-listening').onclick=()=>{if(featured)play(featured.id);};
 function closeMenu(){document.querySelector('.site-header').classList.remove('menu-open');$('menu-toggle').setAttribute('aria-expanded','false');$('menu-toggle').setAttribute('aria-label','メニューを開く');}

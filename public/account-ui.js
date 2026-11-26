@@ -124,6 +124,14 @@ export function makeAccountUI({onSession,onNotice}){
   open,
   revalidate:changedElsewhere,
   isSignedIn:()=>signedIn,
+  async clearHistory(){
+   const tag=sessionTag,version=stateVersion;if(!tag)throw new Error('ログインが必要です。');
+   const response=await fetch('/api/account/history',{method:'DELETE',headers:{'X-Account-Session':tag},credentials:'same-origin',cache:'no-store'});
+   if((response.status===401||response.status===409)&&version===stateVersion&&tag===sessionTag)changedElsewhere();
+   if(!response.ok)throw new Error('再生履歴を削除できませんでした。接続を確認してください。');
+   if(version!==stateVersion||tag!==sessionTag)throw new Error('アカウントが変更されました。履歴を確認してください。');
+   invalidate();notifyTabs();try{await refresh();}catch{throw new Error('履歴は削除されましたが、画面を更新できませんでした。再読み込みしてください。');}
+  },
   canWritePosition:()=>!!(sessionTag||refreshTag)&&Number.isSafeInteger(historyGeneration??refreshGeneration),
   async setFavorite(id,enabled){return write('/api/account/favorite',{episodeId:id,enabled});},
   async setPosition(id,positionSeconds,writerId,sequence,keepalive=false){const generation=historyGeneration??refreshGeneration;if(!Number.isSafeInteger(generation))throw new Error('再生履歴を確認できませんでした。');return write('/api/account/history',{episodeId:id,positionSeconds,writerId,sequence,historyGeneration:generation},keepalive,true);}
