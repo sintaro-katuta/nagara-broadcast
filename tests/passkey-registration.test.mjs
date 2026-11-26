@@ -41,6 +41,10 @@ test('adding a passkey requires its originating account and a one-use verified c
  const failingNotice=makePasskeyRegistration({rateLimit:allow,session:async()=>({accountId:'a',sessionHash:'session-a2',sessionTag:'tag-a'}),verify:async()=>({verified:true,registrationInfo:{credential:{id:'YW5vdGhlcg',publicKey:new Uint8Array([1]),counter:0,transports:[]}}})});
  assert.equal((await failingNotice(req('/api/auth/passkey/register/verify','a',{valid:true},failCookie),env)).status,400);
  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM passkeys').get().n,2);
+ sql.exec('DROP TRIGGER fail_notice');const reusedCookie=await begin({'x-test-session':'session-a2'});
+ const revokedWithExistingKey=makePasskeyRegistration({rateLimit:allow,session:async()=>({accountId:'a',sessionHash:'session-a2',sessionTag:'tag-a'}),verify:async()=>{sql.exec("DELETE FROM account_sessions WHERE token_hash='session-a2'");return {verified:true,registrationInfo:{credential:{id:'Y3JlZA',publicKey:new Uint8Array([1]),counter:0,transports:[]}}}}});
+ assert.equal((await revokedWithExistingKey(req('/api/auth/passkey/register/verify','a',{valid:true},reusedCookie),env)).status,409);
+ assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM recovery_notice_outbox').get().n,1);
  sql.close();
 });
 

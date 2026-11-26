@@ -79,7 +79,7 @@ export function makeAuthRoutes({login=makePasskeyLogin(),registration=makePasske
     if(type==='recovery'||type==='admin-recovery'){
      try{if(env.AUTH_NOTICES_ENABLED!=='true'||typeof env.EMAIL?.send!=='function')throw new Error();normalizeEmail(env.AUTH_EMAIL_FROM);key(env.AUTH_ENCRYPTION_KEY);}catch{return json({error:'復旧機能は準備中です。'},503);}
     }
-    const session=await service.finish(env.DB,token,origin.origin,data);if(!session)return json({error:'登録できませんでした。'},400,cookie(name,'',0));
+    const session=await service.finish(env.DB,token,origin.origin,data);if(!session)return type==='admin-recovery'?json({error:'登録できませんでした。復旧画面から再試行してください。'},400):json({error:'登録できませんでした。'},400,cookie(name,'',0));
     const headers=new Headers({'Content-Type':'application/json','Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff'});
     headers.append('Set-Cookie',cookie(name,'',0));headers.append('Set-Cookie',session);
     return new Response(JSON.stringify({ok:true}),{status:200,headers});
