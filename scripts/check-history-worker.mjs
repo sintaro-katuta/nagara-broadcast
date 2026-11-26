@@ -1,7 +1,7 @@
 import {readFile} from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import {createHash,generateKeyPairSync,sign} from 'node:crypto';
-import {adminBootstrapCode,approveAdminRecovery} from '../cloudflare/admin-bootstrap.mjs';
+import {adminBootstrapCode,approveAdminRecovery,bootstrapFirstAdmin} from '../cloudflare/admin-bootstrap.mjs';
 const state=JSON.parse(await readFile('/tmp/nagara-history-state.json','utf8'));
 if(!/^nagara-history-check-[a-f0-9]{32}$/.test(state.worker)||!/^[a-f0-9]{64}$/.test(state.access)||!Array.isArray(state.sessions)||state.sessions.length!==2||!state.sessions.every(x=>/^[a-f0-9]{64}$/.test(x)))throw new Error('Invalid temporary resource state');
 const origin=`https://${state.worker}.sintaro-katuta.workers.dev`;
@@ -56,3 +56,11 @@ const adminRegistration={id:newId.toString('base64url'),rawId:newId.toString('ba
 const adminFinish=await post('/api/auth/admin-recovery/finish',adminRegistration,adminCookie);assert.equal(adminFinish.status,200);assert.match(adminFinish.headers.get('Set-Cookie'),/__Host-nagara_session=/);
 const after=await (await fetchReady(origin+'/__test/count',{headers:{'X-Test-Access':state.access}})).json();assert.equal(after.adminKeys,1);assert.equal(after.oldAdminKeys,0);assert.equal(after.admins,1);assert.equal(after.adminNotices,1);assert.equal(after.oldSessions,0);
 console.log('Real Cloudflare Worker and D1: browser-bound administrator recovery, credential replacement and notification enqueue verified without sending email.');
+// Recreate a first-admin scenario in the same disposable database only.
+await d1('/query','POST',{sql:'DELETE FROM account_admins WHERE account_id=?',params:[state.adminId]});
+await d1('/query','POST',{sql:'INSERT INTO passkeys VALUES (?,?,?,?,?,?)',params:['second-admin-key',state.adminId,[1,2],0,'[]','2026-01-01']});
+const newSession=cookieOf(adminFinish,'__Host-nagara_session'),accountResponse=await fetchReady(origin+'/api/account',{headers:{Cookie:newSession,'X-Test-Access':state.access}});assert.equal(accountResponse.status,200);const accountData=await accountResponse.json();
+const setupCode=await post('/api/account/admin-setup-code',{},newSession,accountData.sessionTag);assert.equal(setupCode.status,200);const setup=await setupCode.json();assert.equal(setup.code,accountCode);
+assert.equal(await bootstrapFirstAdmin(d1db,setup.code),true);assert.equal(await bootstrapFirstAdmin(d1db,setup.code),false);
+assert.equal((await (await fetchReady(origin+'/__test/count',{headers:{'X-Test-Access':state.access}})).json()).admins,1);
+console.log('Real Cloudflare Worker and D1: signed-in administrator setup code and one-time role assignment verified.');
