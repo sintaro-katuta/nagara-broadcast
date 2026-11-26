@@ -2,13 +2,13 @@ import {pathToFileURL} from 'node:url';
 import {readdir,readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 
-const expectedTables=['accounts','favorites','listening_history','account_sessions','account_admins','passkeys','passkey_challenges','recovery_emails','passkey_login_attempts','recovery_tokens','auth_rate_limits','passkey_registration_attempts','passkey_enrollments','passkey_recovery_attempts','account_auth_generations','position_write_cursors','recovery_notice_outbox','account_deletion_attempts','d1_migrations'];
+const expectedTables=['accounts','favorites','listening_history','account_sessions','account_admins','passkeys','passkey_challenges','recovery_emails','passkey_login_attempts','recovery_tokens','auth_rate_limits','passkey_registration_attempts','passkey_enrollments','passkey_recovery_attempts','account_auth_generations','position_write_cursors','recovery_notice_outbox','account_deletion_attempts','account_history_generations','d1_migrations'];
 const expectedIndexes=['history_by_account_time','account_sessions_expiry','passkeys_account','passkey_login_attempts_expiry','recovery_tokens_account','recovery_tokens_expiry','auth_rate_limits_expiry','passkey_registration_attempts_expiry','passkey_enrollments_expiry','passkey_recovery_attempts_expiry','position_write_cursors_updated','passkey_challenges_expiry','recovery_notice_outbox_due','account_deletion_attempts_expiry'];
 const databaseId='27cb398e-0c26-4740-804d-f6bd49f75764';
 export async function checkMigrationFiles(){
  const dir=new URL('../cloudflare/migrations/',import.meta.url),files=(await readdir(dir)).filter(name=>name.endsWith('.sql')).sort(),hash=createHash('sha256');
  for(const file of files){hash.update(file);hash.update('\0');hash.update(await readFile(new URL(file,dir)));}
- if(files.length!==17||hash.digest('hex')!=='584d8192c0866bce081e491d82e5fb40799985f4f0225af275e7aa1709a8187b')throw new Error('Migration files changed; review and update this workflow before proceeding');
+ if(files.length!==18||hash.digest('hex')!=='72151840322d131b11eeaa9bd9c250f841863529e5c5c531582533aa04f5ee56')throw new Error('Migration files changed; review and update this workflow before proceeding');
 }
 export async function preflight({accountId,token,fetcher=fetch}){
  if(!/^[a-f0-9]{32}$/i.test(accountId||'')||!token)throw new Error('D1 read configuration missing');

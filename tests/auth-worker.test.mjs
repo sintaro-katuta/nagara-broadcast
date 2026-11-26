@@ -21,13 +21,13 @@ function assertion(options,id,privateKey,origin){
 
 test('Worker registration, login, data access and recovery use actual WebAuthn verification',{skip:!sqlite&&'node:sqlite unavailable'},async(t)=>{
  const sql=new sqlite.DatabaseSync(':memory:');sql.exec('PRAGMA foreign_keys=ON');
- const migrations=['0001_account_data.sql','0002_identity_sessions.sql','0003_passkeys.sql','0004_recovery_email.sql','0005_passkey_login_attempts.sql','0006_recovery_tokens.sql','0007_auth_rate_limits.sql','0008_passkey_registration_attempts.sql','0009_passkey_enrollments.sql','0010_passkey_recovery_attempts.sql','0011_enrollment_challenge_expiry.sql','0012_account_auth_generations.sql','0013_position_write_cursors.sql','0015_recovery_notice_outbox.sql','0016_recovery_notice_failures.sql'];
+ const migrations=['0001_account_data.sql','0002_identity_sessions.sql','0003_passkeys.sql','0004_recovery_email.sql','0005_passkey_login_attempts.sql','0006_recovery_tokens.sql','0007_auth_rate_limits.sql','0008_passkey_registration_attempts.sql','0009_passkey_enrollments.sql','0010_passkey_recovery_attempts.sql','0011_enrollment_challenge_expiry.sql','0012_account_auth_generations.sql','0013_position_write_cursors.sql','0015_recovery_notice_outbox.sql','0016_recovery_notice_failures.sql','0018_history_generations.sql'];
  for(const f of ['../cloudflare/schema.sql',...migrations.map(x=>'../cloudflare/migrations/'+x)])sql.exec(readFileSync(new URL(f,import.meta.url),'utf8'));
  sql.exec("INSERT INTO episodes VALUES ('ep','title','tech','','',10,3,'2026-01-01','audio/ep')");
  const db={
   prepare(q){return {
    bind(...args){return {
-    async run(){const s=sql.prepare(q);return /RETURNING/i.test(q)?{results:s.all(...args)}:(s.run(...args),{results:[]})},
+    async run(){const s=sql.prepare(q);return /RETURNING/i.test(q)||/^\s*SELECT\b/i.test(q)?{results:s.all(...args)}:(s.run(...args),{results:[]})},
     async first(){return sql.prepare(q).get(...args)||null},
     async all(){return {results:sql.prepare(q).all(...args)}}
    }},
@@ -60,8 +60,8 @@ test('Worker registration, login, data access and recovery use actual WebAuthn v
  assert.equal(recovered.status,200);assert.equal((await get('/api/account',original)).status,401);
  const newCookie=cookie(recovered,'__Host-nagara_session'),newData=await (await get('/api/account',newCookie)).json();
  assert.equal((await put('/api/account/favorite',{episodeId:'ep',enabled:false},newCookie,originalData.sessionTag)).status,409);
- assert.equal((await put('/api/account/history',{episodeId:'ep',positionSeconds:40,writerId:'writer-1234567890',sequence:2},newCookie,newData.sessionTag)).status,200);
- assert.equal((await put('/api/account/history',{episodeId:'ep',positionSeconds:5,writerId:'writer-1234567890',sequence:1},newCookie,newData.sessionTag)).status,200);
+ assert.equal((await put('/api/account/history',{episodeId:'ep',positionSeconds:40,writerId:'writer-1234567890',sequence:2,historyGeneration:newData.historyGeneration},newCookie,newData.sessionTag)).status,200);
+ assert.equal((await put('/api/account/history',{episodeId:'ep',positionSeconds:5,writerId:'writer-1234567890',sequence:1,historyGeneration:newData.historyGeneration},newCookie,newData.sessionTag)).status,200);
  assert.equal((await (await get('/api/account',newCookie)).json()).history[0].position_seconds,40);
  const logout=tag=>worker.fetch(new Request(origin+'/api/auth/logout',{method:'POST',headers:{Origin:origin,Cookie:newCookie,'X-Account-Session':tag}}),env);
  assert.equal((await logout(originalData.sessionTag)).status,409);

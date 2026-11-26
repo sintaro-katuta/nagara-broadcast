@@ -10,6 +10,7 @@ test('account deletion requires its own current session and a real signed passke
  for(const f of readdirSync(new URL('../cloudflare/migrations/',import.meta.url)).sort())sql.exec(readFileSync(new URL('../cloudflare/migrations/'+f,import.meta.url),'utf8'));
  const db={prepare(q){return {bind(...args){return {async first(){return sql.prepare(q).get(...args)||null},async run(){return sql.prepare(q).run(...args)}}}}}};
  sql.exec("INSERT INTO accounts VALUES ('a'),('b'); INSERT INTO episodes VALUES ('ep','title','tech','','',10,3,'2026-01-01','audio/ep'); INSERT INTO favorites VALUES ('a','ep','2026-01-01'),('b','ep','2026-01-01'); INSERT INTO account_sessions VALUES ('session-a','a',9999999999),('session-b','b',9999999999)");
+ sql.exec("INSERT INTO account_history_generations VALUES ('a',2),('b',3)");
  const {privateKey,publicKey}=generateKeyPairSync('ec',{namedCurve:'prime256v1'}),jwk=publicKey.export({format:'jwk'});
  const cose=Buffer.concat([Buffer.from('a5010203262001215820','hex'),Buffer.from(jwk.x,'base64url'),Buffer.from('225820','hex'),Buffer.from(jwk.y,'base64url')]);
  sql.prepare('INSERT INTO passkeys VALUES (?,?,?,?,?,?)').run('Y3JlZA','a',cose,0,'[]','2026-01-01');
@@ -30,6 +31,8 @@ test('account deletion requires its own current session and a real signed passke
  assert.equal(sql.prepare('SELECT COUNT(*) n FROM favorites WHERE account_id=?').get('a').n,0);
  assert.equal(sql.prepare('SELECT COUNT(*) n FROM account_sessions WHERE account_id=?').get('a').n,0);
  assert.equal(sql.prepare('SELECT COUNT(*) n FROM passkeys WHERE account_id=?').get('a').n,0);
+ assert.equal(sql.prepare('SELECT COUNT(*) n FROM account_history_generations WHERE account_id=?').get('a').n,0);
+ assert.equal(sql.prepare('SELECT generation FROM account_history_generations WHERE account_id=?').get('b').generation,3);
  assert.equal(sql.prepare('SELECT COUNT(*) n FROM favorites WHERE account_id=?').get('b').n,1);
  assert.equal((await handle(request('/api/account/delete/finish',response),env,user)).status,400);
  sql.close();
