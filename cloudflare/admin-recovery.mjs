@@ -42,15 +42,15 @@ export function makeAdminRecovery({options=registrationOptions,verify=verifyRegi
   },
   async finish(db,browserToken,origin,response){
    if(!valid(browserToken))return null;const key=await digest(browserToken),now=clock();
-   const row=await db.prepare("SELECT account_id,challenge FROM passkey_recovery_attempts WHERE browser_token_hash=? AND challenge LIKE 'admin:%' AND expires_at>? AND challenge_expires_at>? AND EXISTS (SELECT 1 FROM account_admins WHERE account_id=passkey_recovery_attempts.account_id)").bind(key,now,now).first();if(!row)return null;
+   const row=await db.prepare("SELECT account_id,challenge,expires_at,challenge_expires_at FROM passkey_recovery_attempts WHERE browser_token_hash=? AND challenge LIKE 'admin:%' AND expires_at>? AND challenge_expires_at>? AND EXISTS (SELECT 1 FROM account_admins WHERE account_id=passkey_recovery_attempts.account_id)").bind(key,now,now).first();if(!row)return null;
    let result;try{result=await verify(origin,row.challenge.slice(6),response);}catch{return null;}
    const credential=result?.verified&&result.registrationInfo?.credential;
    if(!credential||typeof credential.id!=='string'||!/^[A-Za-z0-9_-]{1,2048}$/.test(credential.id)||!(credential.publicKey instanceof Uint8Array)||!Number.isSafeInteger(credential.counter)||credential.counter<0)return null;
    const current=clock(),claim=await db.prepare('UPDATE passkey_recovery_attempts SET challenge=NULL,challenge_expires_at=NULL WHERE browser_token_hash=? AND challenge=? AND expires_at>? AND challenge_expires_at>? RETURNING account_id').bind(key,row.challenge,current,current).first();if(!claim)return null;
-   const session=await prepareSession(current*1000);
+   const session=await prepareSession(current*1000),commitTime=clock();if(row.expires_at<=commitTime||row.challenge_expires_at<=commitTime)return null;
    try{
     const changes=await db.batch([
-     db.prepare('INSERT INTO passkeys(credential_id,account_id,public_key,sign_count,transports,created_at) VALUES (CASE WHEN EXISTS (SELECT 1 FROM account_admins WHERE account_id=?) AND EXISTS (SELECT 1 FROM passkey_recovery_attempts WHERE browser_token_hash=? AND account_id=? AND challenge IS NULL AND expires_at>?) THEN ? ELSE NULL END,?,?,?,?,?) RETURNING credential_id').bind(row.account_id,key,row.account_id,current,credential.id,row.account_id,credential.publicKey,credential.counter,JSON.stringify(credential.transports||[]),new Date(current*1000).toISOString()),
+     db.prepare('INSERT INTO passkeys(credential_id,account_id,public_key,sign_count,transports,created_at) VALUES (CASE WHEN EXISTS (SELECT 1 FROM account_admins WHERE account_id=?) AND EXISTS (SELECT 1 FROM passkey_recovery_attempts WHERE browser_token_hash=? AND account_id=? AND challenge IS NULL AND expires_at>?) THEN ? ELSE NULL END,?,?,?,?,?) RETURNING credential_id').bind(row.account_id,key,row.account_id,commitTime,credential.id,row.account_id,credential.publicKey,credential.counter,JSON.stringify(credential.transports||[]),new Date(commitTime*1000).toISOString()),
      db.prepare('INSERT INTO account_auth_generations(account_id,generation) VALUES (?,1) ON CONFLICT(account_id) DO UPDATE SET generation=generation+1').bind(row.account_id),
      db.prepare('DELETE FROM account_sessions WHERE account_id=?').bind(row.account_id),
      db.prepare('DELETE FROM passkeys WHERE account_id=? AND credential_id<>?').bind(row.account_id,credential.id),
@@ -58,7 +58,7 @@ export function makeAdminRecovery({options=registrationOptions,verify=verifyRegi
      db.prepare('DELETE FROM passkey_registration_attempts WHERE account_id=?').bind(row.account_id),
      db.prepare('DELETE FROM passkey_recovery_attempts WHERE account_id=?').bind(row.account_id),
      db.prepare('INSERT INTO account_sessions(token_hash,account_id,expires_at) VALUES (?,?,?)').bind(session.tokenHash,row.account_id,session.expiresAt),
-     db.prepare('INSERT INTO recovery_notice_outbox(id,account_id,created_at,next_attempt_at) VALUES (?,?,?,?)').bind('admin-recover:'+crypto.randomUUID(),row.account_id,current,current)
+     db.prepare('INSERT INTO recovery_notice_outbox(id,account_id,created_at,next_attempt_at) VALUES (?,?,?,?)').bind('admin-recover:'+crypto.randomUUID(),row.account_id,commitTime,commitTime)
     ]);
     return changes[0]?.results?.length?session.cookie:null;
    }catch{return null;}

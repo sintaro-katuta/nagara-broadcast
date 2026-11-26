@@ -18,6 +18,12 @@ try{
  await sql("INSERT INTO listening_history VALUES ('synthetic-a','test-ep','2026-01-01',12)");
  await sql("INSERT INTO position_write_cursors VALUES ('synthetic-a','test-ep','old-writer-123456',1,'old-write','2026-01-01')");
  await sql(await readFile(new URL('../cloudflare/migrations/0018_history_generations.sql',import.meta.url),'utf8'));
+ await sql('INSERT INTO passkeys VALUES (?,?,?,?,?,?)',['existing-key','synthetic-a',[1],0,'[]','2026-01-01']);
+ await db.batch([
+  db.prepare('INSERT INTO passkeys(credential_id,account_id,public_key,sign_count,transports,created_at) SELECT ?,?,?,?,?,? WHERE 0 RETURNING credential_id').bind('existing-key','synthetic-a',[1],0,'[]','2026-01-01'),
+  db.prepare('INSERT INTO recovery_notice_outbox(id,account_id,created_at,next_attempt_at) SELECT ?,?,?,? WHERE changes()=1 AND EXISTS (SELECT 1 FROM passkeys WHERE credential_id=? AND account_id=?)').bind('synthetic-notice','synthetic-a',1,1,'existing-key','synthetic-a')
+ ]);
+ assert.equal((await sql('SELECT COUNT(*) AS n FROM recovery_notice_outbox')).results[0].n,0);
  assert.equal((await sql('SELECT COUNT(*) AS n FROM listening_history')).results[0].n,1);assert.equal((await sql('SELECT COUNT(*) AS n FROM position_write_cursors')).results[0].n,1);
  const tokens=[randomBytes(32).toString('hex'),randomBytes(32).toString('hex')],hash=s=>createHash('sha256').update(s).digest('hex'),expires=Math.floor(Date.now()/1000)+600;
  for(let i=0;i<2;i++)await sql('INSERT INTO account_sessions(token_hash,account_id,expires_at) VALUES (?,?,?)',[hash(tokens[i]),i?'synthetic-b':'synthetic-a',expires]);
