@@ -4,6 +4,16 @@ import {readFileSync} from 'node:fs';
 import {accountApi} from '../cloudflare/account-api.mjs';
 
 const sqlite=await import('node:sqlite').catch(()=>null);
+test('admin setup code identifies only the current session and does not itself grant access',async()=>{
+ let existing=false;const db={prepare(){return {async first(){return existing?{found:1}:null}}}},id='10000000-0000-4000-8000-000000000001';
+ const user=async()=>({accountId:id,admin:false,sessionTag:'tag'}),request=(tag='tag',origin='https://radio.example')=>new Request('https://radio.example/api/account/admin-setup-code',{method:'POST',headers:{Origin:origin,'X-Account-Session':tag}});
+ assert.equal((await accountApi(request(),db,async()=>null,{adminBootstrapEnabled:true})).status,401);
+ assert.equal((await accountApi(request(),db,user)).status,404);
+ assert.equal((await accountApi(request('wrong'),db,user,{adminBootstrapEnabled:true})).status,409);
+ assert.equal((await accountApi(request('tag','https://evil.example'),db,user,{adminBootstrapEnabled:true})).status,403);
+ const response=await accountApi(request(),db,user,{adminBootstrapEnabled:true}),body=await response.json();assert.match(body.code,/^[a-f0-9]{64}$/);assert.equal(response.headers.get('Cache-Control'),'no-store');
+ existing=true;assert.equal((await accountApi(request(),db,user,{adminBootstrapEnabled:true})).status,409);
+});
 test('account API rejects unauthorized access and isolates accounts', {skip:!sqlite&&'node:sqlite unavailable'}, async()=>{
  const sql=new sqlite.DatabaseSync(':memory:');sql.exec('PRAGMA foreign_keys=ON');
  sql.exec(readFileSync(new URL('../cloudflare/schema.sql',import.meta.url),'utf8'));

@@ -2,6 +2,14 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createHistoryWriteGuard,createPositionWriter} from '../public/player-model.js';
 
+test('administrator setup shows only the signed-in account code when enabled',async()=>{
+ const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout','account-admin-setup-section','account-admin-setup-code','account-admin-setup-result'];
+ const elements=Object.fromEntries(names.map(name=>[name,{hidden:true,disabled:false,textContent:'',focus(){},reset(){}}]));elements['account-dialog'].querySelectorAll=()=>[];
+ globalThis.location={hash:'',pathname:'/',search:''};globalThis.history={state:null,replaceState(){}};globalThis.window={};globalThis.document={getElementById:id=>elements[id],addEventListener(){}};globalThis.BroadcastChannel=undefined;
+ globalThis.fetch=async(path,options={})=>{if(path==='/api/auth/status')return Response.json({available:true,adminSetupAvailable:true});if(path==='/api/account')return Response.json({favorites:[],history:[],historyGeneration:0,sessionTag:'a'.repeat(64)});assert.equal(path,'/api/account/admin-setup-code');assert.equal(options.headers['X-Account-Session'],'a'.repeat(64));return Response.json({code:'b'.repeat(64)});};
+ const {makeAccountUI}=await import('../public/account-ui.js?test=admin-setup');const ui=makeAccountUI({onSession(){},onNotice(){}});await ui.init();assert.equal(elements['account-admin-setup-section'].hidden,false);await elements['account-admin-setup-code'].onclick();assert.equal(elements['account-admin-setup-result'].textContent,'b'.repeat(64));ui.revalidate();assert.equal(elements['account-admin-setup-result'].textContent,'');
+});
+
 test('adding a backup passkey first verifies the existing passkey and keeps the session binding',async()=>{
  const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout','account-add-passkey','account-add-passkey-section'];
  const elements=Object.fromEntries(names.map(name=>[name,{hidden:true,disabled:false,textContent:'',focus(){},reset(){}}]));elements['account-dialog'].querySelectorAll=()=>[];

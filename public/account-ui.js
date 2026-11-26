@@ -30,7 +30,7 @@ export function makeAccountUI({onSession,onNotice}){
  function show(kind){stage=kind;$('account-anonymous').hidden=kind!=='anonymous';$('account-confirm').hidden=kind!=='confirm';$('account-create').hidden=kind!=='create';$('account-signed-in').hidden=kind!=='signed-in';}
  function setBusy(value){busy=value;dialog.querySelectorAll('button,input').forEach(element=>element.disabled=value);}
  async function open(){if(!enabled){await init();if(!enabled){onNotice('ログイン機能を確認できませんでした。接続を確認して、もう一度お試しください。');return;}}if(stage!=='confirm'&&stage!=='create'){show(signedIn?'signed-in':'anonymous');message(signedIn?'ログインしています。':'ログインすると、あとで聴くと再生履歴を別の端末でも使えます。');}if(!dialog.open)dialog.showModal();}
- function invalidate(ready=false,positionTag=null,positionGeneration=null){stateVersion++;signedIn=false;isAdmin=false;sessionTag=null;historyGeneration=null;refreshTag=positionTag;refreshGeneration=positionGeneration;if(adminOpen)adminOpen.hidden=true;if(adminPanel){adminPanel.hidden=true;$('account-admin-storage').textContent='';$('account-admin-mail').textContent='';$('account-admin-notices').textContent='';if($('account-admin-retry'))$('account-admin-retry').hidden=true;if($('account-admin-retry-help'))$('account-admin-retry-help').hidden=true;if($('account-admin-retry-result'))$('account-admin-retry-result').textContent='';}onSession(null,ready);}
+ function invalidate(ready=false,positionTag=null,positionGeneration=null){stateVersion++;signedIn=false;isAdmin=false;sessionTag=null;historyGeneration=null;refreshTag=positionTag;refreshGeneration=positionGeneration;if($('account-admin-setup-result'))$('account-admin-setup-result').textContent='';if($('account-admin-setup-copy'))$('account-admin-setup-copy').hidden=true;if(adminOpen)adminOpen.hidden=true;if(adminPanel){adminPanel.hidden=true;$('account-admin-storage').textContent='';$('account-admin-mail').textContent='';$('account-admin-notices').textContent='';if($('account-admin-retry'))$('account-admin-retry').hidden=true;if($('account-admin-retry-help'))$('account-admin-retry-help').hidden=true;if($('account-admin-retry-result'))$('account-admin-retry-result').textContent='';}onSession(null,ready);}
  function notifyTabs(){if(channel)channel.postMessage('changed');else try{localStorage.setItem('nagara:session-change',crypto.randomUUID());}catch{}}
  async function refresh(){
   const version=stateVersion;
@@ -55,7 +55,7 @@ export function makeAccountUI({onSession,onNotice}){
  if(typeof window.addEventListener==='function')window.addEventListener('online',changedElsewhere);
  function init(){
   if(initializing)return initializing;
-  initializing=(async()=>{try{const response=await fetch('/api/auth/status',{cache:'no-store'});if(!response.ok)throw new Error('アカウントの状態を確認できませんでした。');const status=await response.json();enabled=status.available===true;if($('account-add-passkey-section'))$('account-add-passkey-section').hidden=!enabled||status.passkeyAddAvailable!==true;if(!enabled){onSession(null,true);return;}await refresh();if(link){show('confirm');message(link.kind==='enroll'?'登録を続けるには、メールアドレスを確認してください。':'復旧を続けるには、メールアドレスを確認してください。');if(!dialog.open)dialog.showModal();}}catch{enabled=false;}})().finally(()=>{initializing=null;});
+  initializing=(async()=>{try{const response=await fetch('/api/auth/status',{cache:'no-store'});if(!response.ok)throw new Error('アカウントの状態を確認できませんでした。');const status=await response.json();enabled=status.available===true;if($('account-add-passkey-section'))$('account-add-passkey-section').hidden=!enabled||status.passkeyAddAvailable!==true;if($('account-admin-setup-section'))$('account-admin-setup-section').hidden=!enabled||status.adminSetupAvailable!==true;if(!enabled){onSession(null,true);return;}await refresh();if(link){show('confirm');message(link.kind==='enroll'?'登録を続けるには、メールアドレスを確認してください。':'復旧を続けるには、メールアドレスを確認してください。');if(!dialog.open)dialog.showModal();}}catch{enabled=false;}})().finally(()=>{initializing=null;});
   return initializing;
  }
  async function action(fn){if(busy)return;setBusy(true);try{await fn();}catch(error){message(error?.code==='ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED'?'このパスキーは登録済みです。登録済みのパスキーでログインするか、復旧には別のパスキーの保存先を選んでください。':error?.name==='NotAllowedError'?'操作がキャンセルされました。もう一度お試しください。':error?.message||'操作できませんでした。もう一度お試しください。');}finally{setBusy(false);}}
@@ -105,6 +105,13 @@ export function makeAccountUI({onSession,onNotice}){
   const options=await api('/api/auth/passkey/register/options',{},headers);check();const response=await client.startRegistration({optionsJSON:options});check();
   await api('/api/auth/passkey/register/verify',response,headers);check();message('パスキーを追加しました。登録済みのメールアドレスにもお知らせします。');onNotice('パスキーを追加しました。');
  });
+ if($('account-admin-setup-code'))$('account-admin-setup-code').onclick=()=>action(async()=>{
+  const tag=sessionTag;if(!tag)throw new Error('ログインが必要です。');const result=await api('/api/account/admin-setup-code',{}, {'X-Account-Session':tag});
+  if(tag!==(sessionTag||refreshTag))throw new Error('アカウントが変更されました。');
+  if(!/^[a-f0-9]{64}$/.test(result.code||''))throw new Error('コードを確認できませんでした。');
+  $('account-admin-setup-result').textContent=result.code;if($('account-admin-setup-copy'))$('account-admin-setup-copy').hidden=false;
+ });
+ if($('account-admin-setup-copy'))$('account-admin-setup-copy').onclick=async()=>{const code=$('account-admin-setup-result').textContent;if(!/^[a-f0-9]{64}$/.test(code))return;try{await navigator.clipboard.writeText(code);onNotice('コードをコピーしました。');}catch{onNotice('コードを長押ししてコピーしてください。');}};
  $('account-logout').onclick=()=>action(async()=>{const tag=sessionTag;const response=await fetch('/api/auth/logout',{method:'POST',headers:{'X-Account-Session':tag||''},credentials:'same-origin'});if(response.status===409||response.status===401){changedElsewhere();throw new Error('アカウントが変更されました。');}if(!response.ok)throw new Error('ログアウトできませんでした。');invalidate(true);notifyTabs();show('anonymous');dialog.close();onNotice('ログアウトしました。');});
  const deleteButton=$('account-delete');if(deleteButton)deleteButton.onclick=()=>action(async()=>{
   if(isAdmin)throw new Error('管理者アカウントは削除できません。');
