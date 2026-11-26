@@ -4,7 +4,8 @@ import {createHash,generateKeyPairSync,sign} from 'node:crypto';
 const state=JSON.parse(await readFile('/tmp/nagara-history-state.json','utf8'));
 if(!/^nagara-history-check-[a-f0-9]{32}$/.test(state.worker)||!/^[a-f0-9]{64}$/.test(state.access)||!Array.isArray(state.sessions)||state.sessions.length!==2||!state.sessions.every(x=>/^[a-f0-9]{64}$/.test(x)))throw new Error('Invalid temporary resource state');
 const origin=`https://${state.worker}.sintaro-katuta.workers.dev`;
-const call=(path,method,index,body,tag)=>fetch(origin+path,{method,headers:{Origin:origin,'X-Test-Access':state.access,...(index===null?{}:{Cookie:`__Host-nagara_session=${state.sessions[index]}`}),...(tag?{'X-Account-Session':tag}:{}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});
+async function fetchReady(url,options){let response;for(let i=0;i<20;i++){response=await fetch(url,options);if(response.status!==404)return response;await new Promise(resolve=>setTimeout(resolve,1500));}return response;}
+const call=(path,method,index,body,tag)=>fetchReady(origin+path,{method,headers:{Origin:origin,'X-Test-Access':state.access,...(index===null?{}:{Cookie:`__Host-nagara_session=${state.sessions[index]}`}),...(tag?{'X-Account-Session':tag}:{}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});
 let response;for(let i=0;i<15;i++){response=await call('/api/account','GET',null);if(response.status!==404)break;await new Promise(resolve=>setTimeout(resolve,2000));}assert.equal(response.status,401);
 const read=async index=>{const res=await call('/api/account','GET',index);assert.equal(res.status,200);return res.json();};
 const body=(position,generation,sequence=1)=>({episodeId:'test-ep',positionSeconds:position,writerId:'test-writer-123456789',sequence,historyGeneration:generation});
@@ -18,7 +19,7 @@ a=await read(0);assert.equal((await call('/api/account/history','PUT',0,body(8,0
 assert.equal((await read(1)).history[0].position_seconds,20);assert.equal((await call('/api/account/history','PUT',0,body(25,a.historyGeneration,11),a.sessionTag)).status,200);assert.equal((await read(0)).history[0].position_seconds,25);
 console.log('Real Cloudflare Worker and D1: concurrent deletion, stale-write rejection and account isolation verified.');
 const cookieOf=(res,name)=>res.headers.getSetCookie().find(x=>x.startsWith(name+'=')).split(';')[0];
-const post=(path,data,cookie,tag)=>fetch(origin+path,{method:'POST',headers:{Origin:origin,'X-Test-Access':state.access,'Content-Type':'application/json',Cookie:cookie,...(tag?{'X-Account-Session':tag}:{})},body:JSON.stringify(data)});
+const post=(path,data,cookie,tag)=>fetchReady(origin+path,{method:'POST',headers:{Origin:origin,'X-Test-Access':state.access,'Content-Type':'application/json',Cookie:cookie,...(tag?{'X-Account-Session':tag}:{})},body:JSON.stringify(data)});
 const host=new URL(origin).hostname,originalId=Buffer.from('original'),sessionCookie=`__Host-nagara_session=${state.sessions[0]}`;
 const hash=x=>createHash('sha256').update(x).digest();
 const reauth=await post('/api/auth/passkey/register/reauth-options',{},sessionCookie,a.sessionTag);assert.equal(reauth.status,200);const authOptions=await reauth.json(),addCookie=cookieOf(reauth,'__Host-nagara_registration');
@@ -34,5 +35,5 @@ const attestation=Buffer.concat([Buffer.from('a363666d74646e6f6e656761747453746d
 const client=Buffer.from(JSON.stringify({type:'webauthn.create',challenge:options.challenge,origin,crossOrigin:false}));
 const registration={id:id.toString('base64url'),rawId:id.toString('base64url'),type:'public-key',clientExtensionResults:{},response:{clientDataJSON:client.toString('base64url'),attestationObject:attestation.toString('base64url'),transports:['internal']}};
 assert.equal((await post('/api/auth/passkey/register/verify',registration,sessionCookie+'; '+addCookie,a.sessionTag)).status,200);
-const counts=await (await fetch(origin+'/__test/count',{headers:{'X-Test-Access':state.access}})).json();assert.equal(counts.passkeys,2);assert.equal(counts.notices,1);
+const counts=await (await fetchReady(origin+'/__test/count',{headers:{'X-Test-Access':state.access}})).json();assert.equal(counts.passkeys,2);assert.equal(counts.notices,1);
 console.log('Real Cloudflare Worker and D1: signed reauthentication, backup registration and notification enqueue verified without sending email.');
