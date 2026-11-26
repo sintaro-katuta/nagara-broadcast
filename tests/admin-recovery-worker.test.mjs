@@ -1,0 +1,31 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync,readdirSync} from 'node:fs';
+import {createHash,generateKeyPairSync} from 'node:crypto';
+import worker from '../cloudflare/worker.mjs';
+import {adminBootstrapCode,approveAdminRecovery} from '../cloudflare/admin-bootstrap.mjs';
+import {emailLookup,encryptEmail} from '../cloudflare/recovery-crypto.mjs';
+const sqlite=await import('node:sqlite').catch(()=>null);
+
+test('Worker requires email confirmation and operator approval before real WebAuthn administrator recovery',{skip:!sqlite&&'node:sqlite unavailable'},async(t)=>{
+ const sql=new sqlite.DatabaseSync(':memory:');sql.exec('PRAGMA foreign_keys=ON');sql.exec(readFileSync(new URL('../cloudflare/schema.sql',import.meta.url),'utf8'));
+ for(const f of readdirSync(new URL('../cloudflare/migrations/',import.meta.url)).filter(x=>x.endsWith('.sql')).sort())sql.exec(readFileSync(new URL('../cloudflare/migrations/'+f,import.meta.url),'utf8'));
+ const db={prepare(q){return {bind(...args){return {async run(){const s=sql.prepare(q);return /RETURNING/i.test(q)||/^\s*SELECT\b/i.test(q)?{results:s.all(...args)}:(s.run(...args),{results:[]})},async first(){return sql.prepare(q).get(...args)||null},async all(){return {results:sql.prepare(q).all(...args)}}}},async all(){return {results:sql.prepare(q).all()}}}},async batch(items){sql.exec('BEGIN');try{const out=[];for(const item of items)out.push(await item.run());sql.exec('COMMIT');return out}catch(error){sql.exec('ROLLBACK');throw error}}};
+ const origin='https://radio.example',id='10000000-0000-4000-8000-000000000001',lookup=new Uint8Array(32).fill(2),encryption=new Uint8Array(32).fill(3),now=Math.floor(Date.now()/1000);
+ sql.prepare('INSERT INTO accounts VALUES (?)').run(id);sql.prepare('INSERT INTO account_admins VALUES (?)').run(id);sql.prepare('INSERT INTO recovery_emails VALUES (?,?,?,?)').run(id,await emailLookup('admin@example.com',lookup),await encryptEmail('admin@example.com',id,encryption),'2026');
+ sql.prepare('INSERT INTO passkeys VALUES (?,?,?,?,?,?)').run('b2xk',id,new Uint8Array([1]),0,'[]','2026');sql.prepare('INSERT INTO account_sessions VALUES (?,?,?)').run('old-session',id,now+3600);
+ const env={DB:db,AUTH_ENABLED:'true',PASSKEY_API_ENABLED:'true',ADMIN_RECOVERY_ENABLED:'true',AUTH_NOTICES_ENABLED:'true',AUTH_ORIGIN:origin,AUTH_RATE_KEY:'01'.repeat(32),AUTH_LOOKUP_KEY:'02'.repeat(32),AUTH_ENCRYPTION_KEY:'03'.repeat(32),AUTH_EMAIL_FROM:'sender@example.com',RESEND_API_KEY:'re_test_key_12345'};
+ const messages=[];t.mock.method(globalThis,'fetch',async(url,options)=>{assert.equal(url,'https://api.resend.com/emails');messages.push(JSON.parse(options.body));return Response.json({id:'synthetic'});});
+ const post=(path,data,cookie)=>worker.fetch(new Request(origin+path,{method:'POST',headers:{Origin:origin,'CF-Connecting-IP':'192.0.2.1','Content-Type':'application/json',...(cookie?{Cookie:cookie}:{})},body:JSON.stringify(data)}),env);
+ assert.equal((await post('/api/auth/admin-recovery/start',{email:'admin@example.com'})).status,200);const token=/#admin-recovery=([a-f0-9]{64})/.exec(messages[0].text)[1];
+ const confirmed=await post('/api/auth/admin-recovery/confirm',{token}),cookie=confirmed.headers.getSetCookie().find(x=>x.startsWith('__Host-nagara_admin_recovery=')).split(';')[0],body=await confirmed.json();
+ assert.equal((await post('/api/auth/admin-recovery/options',{},cookie)).status,409);assert.equal(await approveAdminRecovery(db,await adminBootstrapCode(id),body.approvalCode),true);
+ const optionsRes=await post('/api/auth/admin-recovery/options',{},cookie);assert.equal(optionsRes.status,200);const options=await optionsRes.json(),pair=generateKeyPairSync('ec',{namedCurve:'prime256v1'}),jwk=pair.publicKey.export({format:'jwk'}),newId=Buffer.from('new-admin-key');
+ const failed=await post('/api/auth/admin-recovery/finish',{id:'invalid'},cookie);assert.equal(failed.status,400);assert.equal(failed.headers.getSetCookie().length,0);assert.equal((await post('/api/auth/admin-recovery/status',{},cookie)).status,200);
+ const cose=Buffer.concat([Buffer.from('a5010203262001215820','hex'),Buffer.from(jwk.x,'base64url'),Buffer.from('225820','hex'),Buffer.from(jwk.y,'base64url')]);
+ const auth=Buffer.concat([createHash('sha256').update('radio.example').digest(),Buffer.from([0x45,0,0,0,0]),Buffer.alloc(16),Buffer.from([0,newId.length]),newId,cose]);
+ const attestation=Buffer.concat([Buffer.from('a363666d74646e6f6e656761747453746d74a068617574684461746158','hex'),Buffer.from([auth.length]),auth]),client=Buffer.from(JSON.stringify({type:'webauthn.create',challenge:options.challenge,origin,crossOrigin:false}));
+ const registration={id:newId.toString('base64url'),rawId:newId.toString('base64url'),type:'public-key',clientExtensionResults:{},response:{clientDataJSON:client.toString('base64url'),attestationObject:attestation.toString('base64url'),transports:['internal']}};
+ const finished=await post('/api/auth/admin-recovery/finish',registration,cookie);assert.equal(finished.status,200);assert.match(finished.headers.get('Set-Cookie'),/__Host-nagara_session=/);
+ assert.deepEqual(sql.prepare('SELECT credential_id FROM passkeys').all().map(x=>x.credential_id),[registration.id]);assert.equal(sql.prepare('SELECT COUNT(*) n FROM account_admins').get().n,1);assert.equal(sql.prepare("SELECT COUNT(*) n FROM account_sessions WHERE token_hash='old-session'").get().n,0);assert.match(sql.prepare('SELECT id FROM recovery_notice_outbox').get().id,/^admin-recover:/);sql.close();
+});

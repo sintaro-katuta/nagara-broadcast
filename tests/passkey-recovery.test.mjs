@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {emailLookup,encryptEmail} from '../cloudflare/recovery-crypto.mjs';
 import {makeRecovery} from '../cloudflare/passkey-recovery.mjs';
-import {sendRecoveryEmail} from '../cloudflare/recovery-email.mjs';
+import {sendRecoveryEmail,sendAdminRecoveryEmail} from '../cloudflare/recovery-email.mjs';
 import {createHash,generateKeyPairSync} from 'node:crypto';
 import {verifySession} from '../cloudflare/sessions.mjs';
 const sqlite=await import('node:sqlite').catch(()=>null);
@@ -44,6 +44,12 @@ test('email recovery requires verification and refuses administrators',{skip:!sq
  assert.equal(sql.prepare("SELECT COUNT(*) AS n FROM account_sessions WHERE account_id='a'").get().n,sessionsBefore);
  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM recovery_notice_outbox').get().n,1);
  sql.close();
+});
+
+test('administrator recovery mail uses a fragment and describes separate operator approval',async()=>{
+ let message;await sendAdminRecoveryEmail({async send(value){message=value}},{origin:'https://radio.example',from:'no-reply@example.com',to:'user@example.com',token:'a'.repeat(64)});
+ assert.match(message.text,/#admin-recovery=a{64}/);assert.match(message.text,/運用者による確認/);
+ await assert.rejects(sendAdminRecoveryEmail({send(){}},{origin:'http://radio.example',from:'x@example.com',to:'y@example.com',token:'a'.repeat(64)}));
 });
 
 test('recovery messages keep the token in the URL fragment',async()=>{

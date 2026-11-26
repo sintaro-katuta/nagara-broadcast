@@ -12,9 +12,9 @@ function registration(options,id,key,origin){
  const client=Buffer.from(JSON.stringify({type:'webauthn.create',challenge:options.challenge,origin,crossOrigin:false}));
  return {id:id.toString('base64url'),rawId:id.toString('base64url'),type:'public-key',clientExtensionResults:{},response:{clientDataJSON:client.toString('base64url'),attestationObject:attestation.toString('base64url'),transports:['internal']}};
 }
-function assertion(options,id,privateKey,origin){
+function assertion(options,id,privateKey,origin,counter=1){
  const client=Buffer.from(JSON.stringify({type:'webauthn.get',challenge:options.challenge,origin,crossOrigin:false}));
- const auth=Buffer.concat([createHash('sha256').update('radio.example').digest(),Buffer.from([5,0,0,0,1])]);
+ const count=Buffer.alloc(4);count.writeUInt32BE(counter);const auth=Buffer.concat([createHash('sha256').update('radio.example').digest(),Buffer.from([5]),count]);
  const signature=sign('sha256',Buffer.concat([auth,createHash('sha256').update(client).digest()]),privateKey);
  return {id:id.toString('base64url'),rawId:id.toString('base64url'),type:'public-key',clientExtensionResults:{},response:{clientDataJSON:client.toString('base64url'),authenticatorData:auth.toString('base64url'),signature:signature.toString('base64url'),userHandle:null}};
 }
@@ -35,7 +35,7 @@ test('Worker registration, login, data access and recovery use actual WebAuthn v
   }},
   async batch(items){sql.exec('BEGIN');try{const out=[];for(const item of items)out.push(await item.run());sql.exec('COMMIT');return out}catch(e){sql.exec('ROLLBACK');throw e}}
  };
- const messages=[],origin='https://radio.example',env={DB:db,AUTH_ENABLED:'true',PASSKEY_API_ENABLED:'true',AUTH_NOTICES_ENABLED:'true',AUTH_ORIGIN:origin,AUTH_RATE_KEY:'01'.repeat(32),AUTH_LOOKUP_KEY:'02'.repeat(32),AUTH_ENCRYPTION_KEY:'03'.repeat(32),AUTH_EMAIL_FROM:'sender@example.com',RESEND_API_KEY:'re_test_key_12345'};
+ const messages=[],origin='https://radio.example',env={DB:db,AUTH_ENABLED:'true',PASSKEY_API_ENABLED:'true',PASSKEY_ADD_ENABLED:'true',AUTH_NOTICES_ENABLED:'true',AUTH_ORIGIN:origin,AUTH_RATE_KEY:'01'.repeat(32),AUTH_LOOKUP_KEY:'02'.repeat(32),AUTH_ENCRYPTION_KEY:'03'.repeat(32),AUTH_EMAIL_FROM:'sender@example.com',RESEND_API_KEY:'re_test_key_12345'};
  t.mock.method(globalThis,'fetch',async(url,options)=>{assert.equal(url,'https://api.resend.com/emails');messages.push(JSON.parse(options.body));return Response.json({id:'test-message'});});
  const post=(path,data,cookie)=>worker.fetch(new Request(origin+path,{method:'POST',headers:{Origin:origin,'CF-Connecting-IP':'192.0.2.1','Content-Type':'application/json',...(cookie?{Cookie:cookie}:{})},body:JSON.stringify(data)}),env);
  const get=(path,cookie)=>worker.fetch(new Request(origin+path,{headers:{Cookie:cookie}}),env);
@@ -52,6 +52,14 @@ test('Worker registration, login, data access and recovery use actual WebAuthn v
  const loginOptionsResponse=await post('/api/auth/passkey/options',{}),loginCookie=cookie(loginOptionsResponse,'__Host-nagara_passkey_attempt'),loginOptions=await loginOptionsResponse.json();
  const signed=await post('/api/auth/passkey/verify',assertion(loginOptions,firstId,first.privateKey,origin),loginCookie);
  assert.equal(signed.status,200);
+ const bound=(path,data,headersCookie)=>worker.fetch(new Request(origin+path,{method:'POST',headers:{Origin:origin,'CF-Connecting-IP':'192.0.2.1','Content-Type':'application/json',Cookie:headersCookie,'X-Account-Session':originalData.sessionTag},body:JSON.stringify(data)}),env);
+ const reauth=await bound('/api/auth/passkey/register/reauth-options',{},original),addCookie=cookie(reauth,'__Host-nagara_registration'),reauthOptions=await reauth.json();
+ assert.equal((await bound('/api/auth/passkey/register/reauth-verify',assertion(reauthOptions,firstId,first.privateKey,origin,2),original+'; '+addCookie)).status,200);
+ const addOptions=await (await bound('/api/auth/passkey/register/options',{},original+'; '+addCookie)).json(),backup=generateKeyPairSync('ec',{namedCurve:'prime256v1'}),backupId=Buffer.from('backup-key');
+ assert.equal((await bound('/api/auth/passkey/register/verify',registration(addOptions,backupId,backup.publicKey,origin),original+'; '+addCookie)).status,200);
+ assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM passkeys').get().n,2);assert.match(sql.prepare('SELECT id FROM recovery_notice_outbox').get().id,/^passkey-add:/);
+ const backupLogin=await post('/api/auth/passkey/options',{}),backupLoginOptions=await backupLogin.json(),backupLoginCookie=cookie(backupLogin,'__Host-nagara_passkey_attempt');
+ assert.equal((await post('/api/auth/passkey/verify',assertion(backupLoginOptions,backupId,backup.privateKey,origin),backupLoginCookie)).status,200);
  assert.equal((await post('/api/auth/recovery/start',{email:'u@example.com'})).status,200);
  const recoveryToken=/#recover-account=([a-f0-9]{64})/.exec(messages[1].text)[1];
  const recoverConfirm=await post('/api/auth/recovery/confirm',{token:recoveryToken}),recoveryCookie=cookie(recoverConfirm,'__Host-nagara_recovery');

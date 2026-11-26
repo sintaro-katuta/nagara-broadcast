@@ -1,5 +1,6 @@
 import {getAccountData,setFavorite,setListeningPosition,clearListeningHistory} from './account-data.mjs';
 import {storageSummary} from './storage-summary.mjs';
+import {adminBootstrapCode} from './admin-bootstrap.mjs';
 
 const json=(body,status=200)=>Response.json(body,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 async function readLimitedJson(request) {
@@ -11,13 +12,19 @@ async function readLimitedJson(request) {
 }
 // verifyIdentity must verify the credential and return a server-derived accountId
 // and admin flag. This module is not routed until a real verifier is installed.
-export async function accountApi(request,db,verifyIdentity,{getUsage=async()=>null,getNoticeStatus=async()=>null}={}) {
+export async function accountApi(request,db,verifyIdentity,{getUsage=async()=>null,getNoticeStatus=async()=>null,adminBootstrapEnabled=false}={}) {
  const url=new URL(request.url);
- if(!['/api/account','/api/account/favorite','/api/account/history','/api/admin/storage','/api/admin/usage','/api/admin/notices/retry'].includes(url.pathname))return null;
+ if(!['/api/account','/api/account/favorite','/api/account/history','/api/account/admin-setup-code','/api/admin/storage','/api/admin/usage','/api/admin/notices/retry'].includes(url.pathname))return null;
  const identity=await verifyIdentity(request);
  if(!identity?.accountId)return json({error:'ログインが必要です。'},401);
  if(request.method!=='GET'&&request.headers.get('Origin')!==url.origin)return json({error:'リクエストを確認できません。'},403);
  if(request.method!=='GET'&&(!identity.sessionTag||request.headers.get('X-Account-Session')!==identity.sessionTag))return json({error:'アカウントが変更されました。'},409);
+ if(url.pathname==='/api/account/admin-setup-code'){
+  if(!adminBootstrapEnabled)return json({error:'準備中です。'},404);
+  if(request.method!=='POST')return json({error:'許可されていない操作です。'},405);
+  if(await db.prepare('SELECT 1 AS found FROM account_admins LIMIT 1').first())return json({error:'管理者は設定済みです。'},409);
+  return json({code:await adminBootstrapCode(identity.accountId)});
+ }
  if(url.pathname.startsWith('/api/admin/')){
   if(identity.admin!==true)return json({error:'権限がありません。'},403);
   if(url.pathname==='/api/admin/notices/retry'){

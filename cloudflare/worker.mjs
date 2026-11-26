@@ -4,7 +4,7 @@ import {episodeTitle} from '../public/programs.js';
 import {accountApi} from './account-api.mjs';
 import {verifySession,revokeSession} from './sessions.mjs';
 import {makeAuthRoutes} from './auth-routes.mjs';
-import {cleanupExpiredAuth} from './auth-cleanup.mjs';
+import {cleanupExpiredAuth,cleanupOldPositionCursors} from './auth-cleanup.mjs';
 import {deliverRecoveryNotices} from './recovery-notices.mjs';
 import {makeResendEmail,getResendUsage} from './resend-email.mjs';
 import {makeAccountDeletion} from './account-deletion.mjs';
@@ -29,6 +29,10 @@ export default {
   if(controller.cron==='0 * * * *'&&env.AUTH_CLEANUP_ENABLED==='true'){
    const removed=await cleanupExpiredAuth(env.DB,controller.scheduledTime);
    console.log('Expired auth cleanup',JSON.stringify(removed));
+   if(env.POSITION_CURSOR_CLEANUP_ENABLED==='true'){
+    const cursors=await cleanupOldPositionCursors(env.DB,controller.scheduledTime);
+    console.log('Expired position cursors',cursors);
+   }
   }
   if(controller.cron==='*/5 * * * *'&&env.AUTH_NOTICES_ENABLED==='true'){
    const value=env.AUTH_ENCRYPTION_KEY;if(typeof value!=='string'||!/^[a-f0-9]{64}$/i.test(value))throw new Error('Notification configuration unavailable');
@@ -41,7 +45,7 @@ export default {
   try{
    if(request.method==='GET'&&url.pathname==='/api/auth/status'){
     const configured=env.AUTH_ENABLED==='true'&&env.PASSKEY_API_ENABLED==='true'&&env.AUTH_NOTICES_ENABLED==='true'&&env.AUTH_ORIGIN===url.origin&&!!makeResendEmail(env.RESEND_API_KEY)&&typeof env.AUTH_EMAIL_FROM==='string'&&['AUTH_RATE_KEY','AUTH_LOOKUP_KEY','AUTH_ENCRYPTION_KEY'].every(k=>typeof env[k]==='string'&&/^[a-f0-9]{64}$/i.test(env[k]))&&new Set(['AUTH_RATE_KEY','AUTH_LOOKUP_KEY','AUTH_ENCRYPTION_KEY'].map(k=>env[k].toLowerCase())).size===3;
-    return json({available:configured});
+    return json({available:configured,passkeyAddAvailable:configured&&env.PASSKEY_ADD_ENABLED==='true',adminSetupAvailable:configured&&env.ADMIN_BOOTSTRAP_ENABLED==='true',adminRecoveryAvailable:configured&&env.ADMIN_RECOVERY_ENABLED==='true'});
    }
    if(env.AUTH_ENABLED==='true'){
     if(env.PASSKEY_API_ENABLED==='true'){
@@ -57,6 +61,7 @@ export default {
      return new Response(JSON.stringify({ok:true}),{headers:{'Content-Type':'application/json','Cache-Control':'no-store','Set-Cookie':cookie}});
     }
     const accountResponse=await accountApi(request,env.DB,req=>verifySession(req,env.DB),{
+     adminBootstrapEnabled:env.ADMIN_BOOTSTRAP_ENABLED==='true',
      getUsage:()=>getResendUsage(env.RESEND_USAGE_API_KEY),
      getNoticeStatus:async()=>{try{const row=await env.DB.prepare('SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN blocked_at IS NOT NULL THEN 1 ELSE 0 END),0) AS blocked FROM recovery_notice_outbox').first();return {waiting:row.total-row.blocked,blocked:row.blocked};}catch{return null;}}
     });if(accountResponse)return accountResponse;

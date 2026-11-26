@@ -378,3 +378,6 @@ body{background:var(--paper);color:var(--ink)}.site-header{position:relative;bac
 .account-dialog #account-admin-panel h3{font-size:16px;font-weight:700;color:var(--ink)}
 .account-dialog #account-admin-panel p{margin:10px 0;font-size:13px;line-height:1.65;color:var(--subtle);overflow-wrap:anywhere}
 .account-dialog #account-admin-refresh{margin:8px 0 0;padding:6px 0;text-align:left}
+.account-dialog #account-admin-setup-result{overflow-wrap:anywhere;user-select:text}
+.account-dialog #account-admin-recovery-code{overflow-wrap:anywhere;user-select:text}
+.account-privacy{border-top:1px solid var(--line);margin-top:20px;padding-top:12px;color:var(--subtle);font-size:13px;line-height:1.7}.account-privacy summary{min-height:44px;display:flex;align-items:center;cursor:pointer;color:var(--ink);font-weight:700}.account-privacy summary::after{content:'＋';margin-left:auto}.account-privacy[open] summary::after{content:'−'}.account-privacy summary:focus-visible{outline:3px solid var(--primary);outline-offset:3px}.account-privacy p{margin:0 0 12px}

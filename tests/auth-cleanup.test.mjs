@@ -1,7 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync,readdirSync} from 'node:fs';
-import {cleanupExpiredAuth} from '../cloudflare/auth-cleanup.mjs';
+import {cleanupExpiredAuth,cleanupOldPositionCursors} from '../cloudflare/auth-cleanup.mjs';
+import {setListeningPosition} from '../cloudflare/account-data.mjs';
 import worker from '../cloudflare/worker.mjs';
 
 const sqlite=await import('node:sqlite').catch(()=>null);
@@ -10,7 +11,7 @@ function database(){
  sql.exec(readFileSync(new URL('../cloudflare/schema.sql',import.meta.url),'utf8'));
  for(const file of readdirSync(new URL('../cloudflare/migrations/',import.meta.url)).filter(f=>f.endsWith('.sql')).sort())sql.exec(readFileSync(new URL('../cloudflare/migrations/'+file,import.meta.url),'utf8'));
  sql.exec("INSERT INTO accounts(id) VALUES ('a'); INSERT INTO episodes VALUES ('ep','title','tech','','',10,3,'2026-01-01','audio/ep')");
- const d1={prepare(query){return {bind(...args){return {run(){return sql.prepare(query).run(...args)}}}}},async batch(statements){sql.exec('BEGIN');try{const results=statements.map(statement=>({meta:{changes:Number(statement.run().changes)}}));sql.exec('COMMIT');return results;}catch(error){sql.exec('ROLLBACK');throw error;}}};
+ const d1={prepare(query){return {bind(...args){return {run(){return sql.prepare(query).run(...args)},async all(){return {results:sql.prepare(query).all(...args)}},batch(){const s=sql.prepare(query);if(s.columns().length)return {results:s.all(...args),meta:{changes:0}};return {results:[],meta:{changes:Number(s.run(...args).changes)}}}}}}},async batch(statements){sql.exec('BEGIN');try{const results=statements.map(statement=>statement.batch());sql.exec('COMMIT');return results;}catch(error){sql.exec('ROLLBACK');throw error;}}};
  return {sql,d1};
 }
 const tables=['account_sessions','passkey_challenges','passkey_login_attempts','recovery_tokens','auth_rate_limits','passkey_registration_attempts','passkey_enrollments','passkey_recovery_attempts'];
@@ -54,7 +55,34 @@ test('scheduled cleanup is disabled by default and reports database failures',{s
 
 test('failed batch rolls back all cleanup deletions',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{
  const {sql,d1}=database();insert(sql,'account_sessions','expired',1);
- const failing={prepare(query){if(query.includes('passkey_challenges'))return {bind(){return {run(){throw new Error('simulated failure')}}}};return d1.prepare(query)},batch:statements=>d1.batch(statements)};
+ const failing={prepare(query){if(query.includes('passkey_challenges'))return {bind(){return {batch(){throw new Error('simulated failure')}}}};return d1.prepare(query)},batch:statements=>d1.batch(statements)};
  await assert.rejects(cleanupExpiredAuth(failing,2000),/simulated failure/);
  assert.equal(sql.prepare('SELECT COUNT(*) n FROM account_sessions').get().n,1);sql.close();
+});
+
+test('cursor expiry preserves history and blocks delayed writes from the previous generation',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{
+ const {sql,d1}=database(),now=Date.parse('2026-11-26T00:00:00.000Z');
+ sql.exec("INSERT INTO accounts VALUES ('b'); INSERT INTO listening_history VALUES ('a','ep','2026-01-01',42); INSERT INTO position_write_cursors VALUES ('a','ep','writer-1234567890',1,'old','2026-01-01T00:00:00.000Z'),('b','ep','writer-1234567890',1,'live','2026-11-25T00:00:00.000Z')");
+ assert.equal(await cleanupOldPositionCursors(d1,now),1);
+ assert.equal(sql.prepare("SELECT position_seconds FROM listening_history WHERE account_id='a'").get().position_seconds,42);
+ assert.equal(sql.prepare("SELECT generation FROM account_history_generations WHERE account_id='a'").get().generation,1);
+ assert.equal(sql.prepare("SELECT COUNT(*) n FROM position_write_cursors WHERE account_id='b'").get().n,1);
+ assert.equal(await setListeningPosition(d1,'a','ep',50,'writer-1234567890',2,0),false);
+ assert.equal(sql.prepare("SELECT COUNT(*) n FROM position_write_cursors WHERE account_id='a'").get().n,0);
+ assert.equal(await setListeningPosition(d1,'a','ep',60,'writer-1234567890',3,1),true);
+ assert.equal(sql.prepare("SELECT position_seconds FROM listening_history WHERE account_id='a'").get().position_seconds,60);
+ assert.equal(await cleanupOldPositionCursors(d1,now),0);sql.close();
+});
+
+test('cursor expiry is bounded and rolls generation back when deletion fails',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{
+ const {sql,d1}=database(),now=Date.parse('2026-11-26T00:00:00.000Z');
+ const insert=sql.prepare("INSERT INTO position_write_cursors VALUES ('a','ep',?,1,?,'2026-01-01T00:00:00.000Z')");for(let i=0;i<201;i++)insert.run('writer-'+i,'id-'+i);
+ sql.exec("CREATE TRIGGER stop_cursor_delete BEFORE DELETE ON position_write_cursors BEGIN SELECT RAISE(ABORT, 'delete failed'); END");
+ await assert.rejects(cleanupOldPositionCursors(d1,now),/delete failed/);
+ assert.equal(sql.prepare('SELECT COUNT(*) n FROM account_history_generations').get().n,0);
+ assert.equal(sql.prepare('SELECT COUNT(*) n FROM position_write_cursors').get().n,201);
+ sql.exec('DROP TRIGGER stop_cursor_delete');assert.equal(await cleanupOldPositionCursors(d1,now),200);
+ assert.equal(sql.prepare('SELECT COUNT(*) n FROM position_write_cursors').get().n,1);
+ assert.equal(await cleanupOldPositionCursors(d1,now),1);
+ assert.equal(sql.prepare("SELECT generation FROM account_history_generations WHERE account_id='a'").get().generation,2);sql.close();
 });

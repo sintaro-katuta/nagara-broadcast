@@ -10,7 +10,7 @@ export function previewConfig({databaseId,origin,expiresAt,now=Date.now()}){
  return {
   name:'nagara-auth-staging',main:fileURLToPath(new URL('../cloudflare/staging-worker.mjs',import.meta.url)),compatibility_date:'2026-10-20',
   assets:{directory:fileURLToPath(new URL('../cloudflare/public/',import.meta.url)),binding:'ASSETS',run_worker_first:true},
-  d1_databases:[{binding:'DB',database_name:'nagara-auth-preview',database_id:databaseId}],vars:{PREVIEW_ONLY:'true',PREVIEW_EXPIRES_AT:String(expires),AUTH_ORIGIN:origin,AUTH_EMAIL_FROM:'no-reply@mail.nagara-broadcast.sintaro-katuta.com',AUTH_ENABLED:'true',PASSKEY_API_ENABLED:'true',AUTH_NOTICES_ENABLED:'true'}
+  d1_databases:[{binding:'DB',database_name:'nagara-auth-preview',database_id:databaseId}],vars:{PREVIEW_ONLY:'true',PREVIEW_EXPIRES_AT:String(expires),AUTH_ORIGIN:origin,AUTH_EMAIL_FROM:'no-reply@mail.nagara-broadcast.sintaro-katuta.com',AUTH_ENABLED:'true',PASSKEY_API_ENABLED:'true',PASSKEY_ADD_ENABLED:'true',ADMIN_BOOTSTRAP_ENABLED:'true',ADMIN_RECOVERY_ENABLED:'true',AUTH_NOTICES_ENABLED:'true'}
  };
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
