@@ -15,6 +15,22 @@ export function resumePosition(saved,duration,accountReady=true){
  const position=Number(saved||0);
  return Number.isFinite(position)&&position>0&&position<duration-2?position:0;
 }
+// Keep the last confirmed identity through temporary revalidation. A paused
+// player must not write an old position into a new history generation.
+export function createHistoryWriteGuard(){
+ let lastSession=null,suppressed=false;
+ return {
+  observeSession(data,paused,hasCurrent){
+   if(!data)return;
+   const changed=!lastSession||lastSession.tag!==data.sessionTag||lastSession.generation!==data.historyGeneration;
+   if(changed&&paused&&hasCurrent)suppressed=true;
+   lastSession={tag:data.sessionTag,generation:data.historyGeneration};
+  },
+  suppress(){suppressed=true;},
+  resume(){suppressed=false;},
+  canWrite(){return !suppressed;}
+ };
+}
 export function createPositionWriter(account,writerId,onError){
  let sequence=0;
  return (id,seconds,final=false)=>{
