@@ -3,7 +3,7 @@ import {pathToFileURL} from 'node:url';
 
 const databaseId='27cb398e-0c26-4740-804d-f6bd49f75764';
 export async function runAdminBootstrap({account,d1Token,workerToken,code,fetcher=fetch}){
-if(!/^[a-f0-9]{32}$/i.test(account||'')||!d1Token||!workerToken||!/^[a-f0-9]{64}$/.test(code||''))throw new Error('Invalid bootstrap configuration');
+if(!/^[a-f0-9]{32}$/i.test(account||'')||!d1Token||!workerToken||!/^[A-Za-z0-9_-]{22}$/.test(code||''))throw new Error('Invalid bootstrap configuration');
 const base=`https://api.cloudflare.com/client/v4/accounts/${account}`;
 async function request(path,token,options={}){
  const response=await fetcher(base+path,{...options,headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},redirect:'error',signal:AbortSignal.timeout(15000)});

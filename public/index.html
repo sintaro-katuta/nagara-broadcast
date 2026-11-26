@@ -15,6 +15,7 @@
    <button id="account-signin" type="button" class="action-primary account-primary">パスキーでログイン</button>
    <button id="account-register-toggle" type="button" class="account-link">はじめての方は登録</button>
    <button id="account-recover-toggle" type="button" class="account-link">パスキーを使えない方</button>
+   <button id="account-admin-recover-toggle" type="button" class="account-link" hidden>管理者のパスキーを復旧</button>
    <form id="account-email-form" hidden>
     <label for="account-email">メールアドレス</label>
     <input id="account-email" type="email" autocomplete="email" required maxlength="254" placeholder="you@example.com">
@@ -23,6 +24,7 @@
    </form>
   </div>
   <div id="account-confirm" hidden><button id="account-confirm-button" type="button" class="action-primary account-primary">メールアドレスを確認</button><button type="button" class="account-link" data-account-restart>最初からやり直す</button></div>
+  <div id="account-admin-recovery-wait" hidden><p class="account-message">このコードを運用者へ伝えてください。確認後、同じブラウザで続けられます。</p><p id="account-admin-recovery-code" class="account-message"></p><button id="account-admin-recovery-copy" type="button" class="account-link">コードをコピー</button><button id="account-admin-recovery-continue" type="button" class="action-primary account-primary">確認後に続ける</button><button type="button" class="account-link" data-account-restart>最初からやり直す</button></div>
   <div id="account-create" hidden><button id="account-create-button" type="button" class="action-primary account-primary">パスキーを登録</button><button type="button" class="account-link" data-account-restart>最初からやり直す</button></div>
   <div id="account-signed-in" hidden>
    <div id="account-add-passkey-section" hidden><button id="account-add-passkey" type="button" class="account-link">予備のパスキーを追加</button><p class="account-message">いつものパスキーで本人確認した後、別の保存先に予備のパスキーを登録します。</p></div>

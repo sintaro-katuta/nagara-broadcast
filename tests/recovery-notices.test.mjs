@@ -33,6 +33,11 @@ test('added passkeys send an accurate notification using the retry queue',{skip:
  assert.deepEqual(await deliverRecoveryNotices(db,{async send(value){message=value}},'sender@example.com',key,1000000),{sent:1,failed:0});
  assert.match(message.subject,/パスキー追加/);assert.match(message.text,/新しいパスキーが追加/);assert.doesNotMatch(message.text,/メールによる復旧/);assert.equal(sql.prepare('SELECT COUNT(*) n FROM recovery_notice_outbox').get().n,0);sql.close();
 });
+test('administrator recovery sends a distinct security notice',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{
+ const {sql,key,db}=await setup();sql.exec("UPDATE recovery_notice_outbox SET id='admin-recover:test'");let message;
+ assert.deepEqual(await deliverRecoveryNotices(db,{async send(value){message=value}},'sender@example.com',key,1000000),{sent:1,failed:0});
+ assert.match(message.subject,/管理者/);assert.match(message.text,/以前のパスキーとログイン状態は無効/);sql.close();
+});
 
 test('concurrent workers cannot claim the same notification before its lease expires',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{
  const {sql,key,db}=await setup();let release,entered,calls=0;const gate=new Promise(resolve=>{release=resolve}),started=new Promise(resolve=>{entered=resolve});

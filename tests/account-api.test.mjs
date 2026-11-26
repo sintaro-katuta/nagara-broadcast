@@ -11,7 +11,7 @@ test('admin setup code identifies only the current session and does not itself g
  assert.equal((await accountApi(request(),db,user)).status,404);
  assert.equal((await accountApi(request('wrong'),db,user,{adminBootstrapEnabled:true})).status,409);
  assert.equal((await accountApi(request('tag','https://evil.example'),db,user,{adminBootstrapEnabled:true})).status,403);
- const response=await accountApi(request(),db,user,{adminBootstrapEnabled:true}),body=await response.json();assert.match(body.code,/^[a-f0-9]{64}$/);assert.equal(response.headers.get('Cache-Control'),'no-store');
+ const response=await accountApi(request(),db,user,{adminBootstrapEnabled:true}),body=await response.json();assert.match(body.code,/^[A-Za-z0-9_-]{22}$/);assert.equal(response.headers.get('Cache-Control'),'no-store');
  existing=true;assert.equal((await accountApi(request(),db,user,{adminBootstrapEnabled:true})).status,409);
 });
 test('account API rejects unauthorized access and isolates accounts', {skip:!sqlite&&'node:sqlite unavailable'}, async()=>{

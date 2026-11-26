@@ -379,3 +379,4 @@ body{background:var(--paper);color:var(--ink)}.site-header{position:relative;bac
 .account-dialog #account-admin-panel p{margin:10px 0;font-size:13px;line-height:1.65;color:var(--subtle);overflow-wrap:anywhere}
 .account-dialog #account-admin-refresh{margin:8px 0 0;padding:6px 0;text-align:left}
 .account-dialog #account-admin-setup-result{overflow-wrap:anywhere;user-select:text}
+.account-dialog #account-admin-recovery-code{overflow-wrap:anywhere;user-select:text}

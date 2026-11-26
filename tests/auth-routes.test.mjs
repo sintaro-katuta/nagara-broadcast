@@ -76,13 +76,13 @@ test('public Worker does not expose passkey routes without the release flags',as
  const response=await worker.fetch(request,{AUTH_ENABLED:'false'});
  assert.equal(response.status,404);
  const status=await worker.fetch(new Request('https://radio.example/api/auth/status'),{AUTH_ENABLED:'false'});
- assert.deepEqual(await status.json(),{available:false,passkeyAddAvailable:false,adminSetupAvailable:false});
+ assert.deepEqual(await status.json(),{available:false,passkeyAddAvailable:false,adminSetupAvailable:false,adminRecoveryAvailable:false});
  const ready={AUTH_ENABLED:'true',PASSKEY_API_ENABLED:'true',AUTH_NOTICES_ENABLED:'true',AUTH_ORIGIN:'https://radio.example',AUTH_RATE_KEY:'01'.repeat(32),AUTH_LOOKUP_KEY:'02'.repeat(32),AUTH_ENCRYPTION_KEY:'03'.repeat(32),AUTH_EMAIL_FROM:'sender@example.com',RESEND_API_KEY:'re_test_key_12345'};
- assert.deepEqual(await (await worker.fetch(new Request('https://radio.example/api/auth/status'),ready)).json(),{available:true,passkeyAddAvailable:false,adminSetupAvailable:false});
- assert.deepEqual(await (await worker.fetch(new Request('https://radio.example/api/auth/status'),{...ready,PASSKEY_ADD_ENABLED:'true',ADMIN_BOOTSTRAP_ENABLED:'true'})).json(),{available:true,passkeyAddAvailable:true,adminSetupAvailable:true});
- assert.deepEqual(await (await worker.fetch(new Request('https://radio.example/api/auth/status'),{...ready,AUTH_LOOKUP_KEY:ready.AUTH_RATE_KEY})).json(),{available:false,passkeyAddAvailable:false,adminSetupAvailable:false});
- assert.deepEqual(await (await worker.fetch(new Request('https://radio.example/api/auth/status'),{...ready,AUTH_NOTICES_ENABLED:'false'})).json(),{available:false,passkeyAddAvailable:false,adminSetupAvailable:false});
- assert.deepEqual(await (await worker.fetch(new Request('https://radio.example/api/auth/status'),{...ready,RESEND_API_KEY:''})).json(),{available:false,passkeyAddAvailable:false,adminSetupAvailable:false});
+ assert.deepEqual(await (await worker.fetch(new Request('https://radio.example/api/auth/status'),ready)).json(),{available:true,passkeyAddAvailable:false,adminSetupAvailable:false,adminRecoveryAvailable:false});
+ assert.deepEqual(await (await worker.fetch(new Request('https://radio.example/api/auth/status'),{...ready,PASSKEY_ADD_ENABLED:'true',ADMIN_BOOTSTRAP_ENABLED:'true',ADMIN_RECOVERY_ENABLED:'true'})).json(),{available:true,passkeyAddAvailable:true,adminSetupAvailable:true,adminRecoveryAvailable:true});
+ assert.deepEqual(await (await worker.fetch(new Request('https://radio.example/api/auth/status'),{...ready,AUTH_LOOKUP_KEY:ready.AUTH_RATE_KEY})).json(),{available:false,passkeyAddAvailable:false,adminSetupAvailable:false,adminRecoveryAvailable:false});
+ assert.deepEqual(await (await worker.fetch(new Request('https://radio.example/api/auth/status'),{...ready,AUTH_NOTICES_ENABLED:'false'})).json(),{available:false,passkeyAddAvailable:false,adminSetupAvailable:false,adminRecoveryAvailable:false});
+ assert.deepEqual(await (await worker.fetch(new Request('https://radio.example/api/auth/status'),{...ready,RESEND_API_KEY:''})).json(),{available:false,passkeyAddAvailable:false,adminSetupAvailable:false,adminRecoveryAvailable:false});
 });
 
 test('registration, login and recovery integrate without sending real email',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{
