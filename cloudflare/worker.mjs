@@ -8,6 +8,7 @@ import {cleanupExpiredAuth,cleanupOldPositionCursors} from './auth-cleanup.mjs';
 import {deliverRecoveryNotices} from './recovery-notices.mjs';
 import {makeResendEmail,getResendUsage} from './resend-email.mjs';
 import {makeAccountDeletion} from './account-deletion.mjs';
+import {getMailPoolStatus} from './auth-rate-limit.mjs';
 
 const json=(value,status=200)=>Response.json(value,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 const publicEpisode=row=>({id:row.id,title:episodeTitle(row),channel:row.channel,description:row.description,source:row.source,duration:row.duration,size:row.size,date:row.date,audio:`/audio/${row.id}.mp3`,demo:false});
@@ -63,6 +64,7 @@ export default {
     const accountResponse=await accountApi(request,env.DB,req=>verifySession(req,env.DB),{
      adminBootstrapEnabled:env.ADMIN_BOOTSTRAP_ENABLED==='true',
      getUsage:()=>getResendUsage(env.RESEND_USAGE_API_KEY),
+     getMailPools:()=>getMailPoolStatus(env.DB,env.AUTH_RATE_KEY),
      getNoticeStatus:async()=>{try{const row=await env.DB.prepare('SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN blocked_at IS NOT NULL THEN 1 ELSE 0 END),0) AS blocked FROM recovery_notice_outbox').first();return {waiting:row.total-row.blocked,blocked:row.blocked};}catch{return null;}}
     });if(accountResponse)return accountResponse;
    }

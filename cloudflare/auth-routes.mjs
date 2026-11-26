@@ -6,7 +6,7 @@ import {makePasskeyRegistration} from './passkey-registration.mjs';
 import {sendEnrollmentEmail} from './enrollment-email.mjs';
 import {sendRecoveryEmail,sendAdminRecoveryEmail} from './recovery-email.mjs';
 import {normalizeEmail} from './recovery-crypto.mjs';
-import {rateLimitKey,consumeRateLimit} from './auth-rate-limit.mjs';
+import {rateLimitKey,consumeRateLimit,MAIL_POOLS} from './auth-rate-limit.mjs';
 
 const paths=new Set(['/api/auth/passkey/options','/api/auth/passkey/verify','/api/auth/passkey/register/reauth-options','/api/auth/passkey/register/reauth-verify','/api/auth/passkey/register/options','/api/auth/passkey/register/verify','/api/auth/enroll/start','/api/auth/enroll/confirm','/api/auth/enroll/options','/api/auth/enroll/finish','/api/auth/recovery/start','/api/auth/recovery/confirm','/api/auth/recovery/options','/api/auth/recovery/finish','/api/auth/admin-recovery/start','/api/auth/admin-recovery/confirm','/api/auth/admin-recovery/status','/api/auth/admin-recovery/cancel','/api/auth/admin-recovery/options','/api/auth/admin-recovery/finish']);
 const names={enroll:'__Host-nagara_enroll',recovery:'__Host-nagara_recovery','admin-recovery':'__Host-nagara_admin_recovery'};
@@ -52,7 +52,7 @@ export function makeAuthRoutes({login=makePasskeyLogin(),registration=makePasske
     // allowance. These are application caps, not a provider quota guarantee.
     const addressKey=await rateLimitKey(rateKey,'destination',`${type}\0${email}`),addressLimit=await consumeRateLimit(env.DB,addressKey,3,3600);
     const senderKey=await rateLimitKey(rateKey,'client',`mail:${type}:${ip}`),senderLimit=await consumeRateLimit(env.DB,senderKey,10,3600);
-    const reserve=async()=>{const poolKey=await rateLimitKey(rateKey,'account',`mail-pool:${type}`);return (await consumeRateLimit(env.DB,poolKey,type==='admin-recovery'?5:type==='recovery'?25:40,86400)).allowed;};
+    const reserve=async()=>{const poolKey=await rateLimitKey(rateKey,'account',`mail-pool:${type}`);return (await consumeRateLimit(env.DB,poolKey,MAIL_POOLS[type],86400)).allowed;};
     const deliver=async()=>{if(addressLimit.allowed&&senderLimit.allowed){
      if(type==='enroll'){
       if(await reserve()){

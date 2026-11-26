@@ -12,7 +12,7 @@ async function readLimitedJson(request) {
 }
 // verifyIdentity must verify the credential and return a server-derived accountId
 // and admin flag. This module is not routed until a real verifier is installed.
-export async function accountApi(request,db,verifyIdentity,{getUsage=async()=>null,getNoticeStatus=async()=>null,adminBootstrapEnabled=false}={}) {
+export async function accountApi(request,db,verifyIdentity,{getUsage=async()=>null,getNoticeStatus=async()=>null,getMailPools=async()=>null,adminBootstrapEnabled=false}={}) {
  const url=new URL(request.url);
  if(!['/api/account','/api/account/favorite','/api/account/history','/api/account/admin-setup-code','/api/admin/storage','/api/admin/usage','/api/admin/notices/retry'].includes(url.pathname))return null;
  const identity=await verifyIdentity(request);
@@ -37,7 +37,7 @@ export async function accountApi(request,db,verifyIdentity,{getUsage=async()=>nu
   if(request.method!=='GET')return json({error:'許可されていない操作です。'},405);
   if(url.pathname==='/api/admin/usage'){
    if(request.headers.get('X-Account-Session')!==identity.sessionTag)return json({error:'アカウントが変更されました。'},409);
-   const [storage,resend,notices]=await Promise.all([storageSummary(db),getUsage(),getNoticeStatus()]);return json({storage:{bytes:storage.bytes,count:storage.count},resend,notices});
+   const [storage,resend,notices,mailPools]=await Promise.all([storageSummary(db),getUsage(),getNoticeStatus(),getMailPools()]);return json({storage:{bytes:storage.bytes,count:storage.count},resend,notices,mailPools});
   }
   return json(await storageSummary(db));
  }
