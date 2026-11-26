@@ -62,6 +62,18 @@ test('auth routes enforce origin, limit email requests and keep tokens in cookie
  assert.equal((await routes(request('/api/auth/enroll/start',{email:'u@example.com'}),{...env,AUTH_RATE_KEY:'bad'})).status,503);
 });
 
+test('enrollment mail caps are isolated from the recovery allowance',async()=>{
+ const buckets=new Map(),db={prepare(){return {bind(id,expires){return {async first(){const n=(buckets.get(id)||0)+1;buckets.set(id,n);return {attempts:n,expires_at:expires}}}}}}};
+ let enroll=0,recover=0;
+ const routes=makeAuthRoutes({enrollment:{async begin(){return 'a'.repeat(64)}},recovery:{async issue(){return {to:'user@example.com',token:'b'.repeat(64)}}},sendEnroll:async()=>{enroll++},sendRecovery:async()=>{recover++}});
+ const origin='https://radio.example',env={DB:db,AUTH_ORIGIN:origin,AUTH_RATE_KEY:'01'.repeat(32),AUTH_LOOKUP_KEY:'02'.repeat(32),AUTH_ENCRYPTION_KEY:'03'.repeat(32),AUTH_EMAIL_FROM:'sender@example.com',EMAIL:{async send(){}}};
+ const request=(type,email,ip)=>new Request(origin+`/api/auth/${type}/start`,{method:'POST',headers:{Origin:origin,'CF-Connecting-IP':ip,'Content-Type':'application/json'},body:JSON.stringify({email})});
+ for(let i=0;i<41;i++)assert.equal((await routes(request('enroll',i===0?'user@example.com':`user${i}@example.com`,`192.0.2.${1+Math.floor(i/10)}`),env)).status,200);
+ assert.equal(enroll,40);
+ assert.equal((await routes(request('recovery','user@example.com','192.0.2.1'),env)).status,200);
+ assert.equal(recover,1);
+});
+
 test('backup passkey routes stay disabled until notification configuration is ready',async()=>{
  const db={prepare(){return {bind(_key,expiry){return {async first(){return {attempts:1,expires_at:expiry}}}}}}};let called=0;
  const routes=makeAuthRoutes({registration:async()=>{called++;return Response.json({ok:true})}}),origin='https://radio.example';

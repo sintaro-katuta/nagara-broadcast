@@ -14,6 +14,7 @@ test('email recovery requires verification and refuses administrators',{skip:!sq
  const db={prepare(q){return {bind(...args){return {async run(){const statement=sql.prepare(q);return /RETURNING/i.test(q)?{results:statement.all(...args)}:(statement.run(...args),{results:[]})},async first(){return sql.prepare(q).get(...args)||null},async all(){return {results:sql.prepare(q).all(...args)}}}}}},async batch(items){sql.exec('BEGIN');try{const result=[];for(const item of items)result.push(await item.run());sql.exec('COMMIT');return result}catch(e){sql.exec('ROLLBACK');throw e}}};
  const key=crypto.getRandomValues(new Uint8Array(32)),other=crypto.getRandomValues(new Uint8Array(32));
  sql.exec("INSERT INTO accounts VALUES ('a'),('admin'); INSERT INTO account_admins VALUES ('admin'); INSERT INTO account_sessions VALUES ('old','a',9999999)");
+ for(let i=0;i<20;i++)sql.prepare("INSERT INTO passkeys VALUES (?, 'a', x'01', 0, '[]', '2026-01-01')").run('old'+i);
  for(const [id,email] of [['a','user@example.com'],['admin','admin@example.com']])sql.prepare('INSERT INTO recovery_emails VALUES (?,?,?,?)').run(id,await emailLookup(email,key),await encryptEmail(email,id,other),'2026-01-01');
  const recovery=makeRecovery({options:async()=>({challenge:'c'.repeat(43)}),verify:async(_origin,challenge,response)=>({verified:challenge==='c'.repeat(43)&&response.valid,registrationInfo:{credential:{id:response.id||'credential',publicKey:new Uint8Array([1,2]),counter:0,transports:[]}}})});
  assert.equal(await recovery.issue(db,'missing@example.com',key,other,1000),null);
@@ -31,6 +32,7 @@ test('email recovery requires verification and refuses administrators',{skip:!sq
  assert.equal(await recovery.finish(db,browser,'https://radio.example',{valid:true},1004),null);
  assert.equal(sql.prepare("SELECT COUNT(*) AS n FROM account_sessions WHERE token_hash='old'").get().n,0);
  assert.equal(sql.prepare("SELECT account_id FROM passkeys WHERE credential_id='credential'").get().account_id,'a');
+ assert.equal(sql.prepare("SELECT COUNT(*) AS n FROM passkeys WHERE account_id='a'").get().n,1);
  // A later recovery request supersedes an earlier browser attempt.
  const first=await recovery.issue(db,'user@example.com',key,other,1004),second=await recovery.issue(db,'user@example.com',key,other,1004);
  const oldBrowser=await recovery.confirm(db,first.token,1005),newBrowser=await recovery.confirm(db,second.token,1006);
@@ -63,11 +65,12 @@ test('recovery cannot commit if its notification cannot be queued',{skip:!sqlite
  for(const f of ['../cloudflare/schema.sql','../cloudflare/migrations/0001_account_data.sql','../cloudflare/migrations/0002_identity_sessions.sql','../cloudflare/migrations/0003_passkeys.sql','../cloudflare/migrations/0004_recovery_email.sql','../cloudflare/migrations/0006_recovery_tokens.sql','../cloudflare/migrations/0010_passkey_recovery_attempts.sql','../cloudflare/migrations/0012_account_auth_generations.sql'])sql.exec(readFileSync(new URL(f,import.meta.url),'utf8'));
  const db={prepare(q){return {bind(...args){return {async run(){const s=sql.prepare(q);return /RETURNING/i.test(q)?{results:s.all(...args)}:(s.run(...args),{results:[]})},async first(){return sql.prepare(q).get(...args)||null},async all(){return {results:sql.prepare(q).all(...args)}}}}}},async batch(items){sql.exec('BEGIN');try{const out=[];for(const item of items)out.push(await item.run());sql.exec('COMMIT');return out}catch(e){sql.exec('ROLLBACK');throw e}}};
  const lookup=crypto.getRandomValues(new Uint8Array(32)),key=crypto.getRandomValues(new Uint8Array(32));sql.exec("INSERT INTO accounts VALUES ('a'); INSERT INTO account_sessions VALUES ('old','a',9999999)");
+ sql.exec("INSERT INTO passkeys VALUES ('oldkey','a',x'01',0,'[]','2026-01-01')");
  sql.prepare('INSERT INTO recovery_emails VALUES (?,?,?,?)').run('a',await emailLookup('user@example.com',lookup),await encryptEmail('user@example.com','a',key),'2026-01-01');
  const recovery=makeRecovery({options:async()=>({challenge:'c'.repeat(43)}),verify:async()=>({verified:true,registrationInfo:{credential:{id:'newkey',publicKey:new Uint8Array([1]),counter:0}}})});
  const issued=await recovery.issue(db,'user@example.com',lookup,key,1000),browser=await recovery.confirm(db,issued.token,1001);await recovery.options(db,browser,'https://radio.example',1002);
  assert.equal(await recovery.finish(db,browser,'https://radio.example',{},1003),null);
- assert.equal(sql.prepare('SELECT COUNT(*) n FROM passkeys').get().n,0);assert.equal(sql.prepare("SELECT COUNT(*) n FROM account_sessions WHERE token_hash='old'").get().n,1);sql.close();
+ assert.equal(sql.prepare("SELECT COUNT(*) n FROM passkeys WHERE credential_id='oldkey'").get().n,1);assert.equal(sql.prepare("SELECT COUNT(*) n FROM account_sessions WHERE token_hash='old'").get().n,1);sql.close();
 });
 
 test('recovery challenges expire independently after five minutes',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{
@@ -76,9 +79,14 @@ test('recovery challenges expire independently after five minutes',{skip:!sqlite
  const db={prepare(q){return {bind(...args){return {async run(){const s=sql.prepare(q);return /RETURNING/i.test(q)?{results:s.all(...args)}:(s.run(...args),{results:[]})},async first(){return sql.prepare(q).get(...args)||null},async all(){return {results:sql.prepare(q).all(...args)}}}}}},async batch(items){sql.exec('BEGIN');try{const out=[];for(const item of items)out.push(await item.run());sql.exec('COMMIT');return out}catch(e){sql.exec('ROLLBACK');throw e}}};
  const key=crypto.getRandomValues(new Uint8Array(32)),encKey=crypto.getRandomValues(new Uint8Array(32));sql.exec("INSERT INTO accounts VALUES ('a')");
  sql.prepare('INSERT INTO recovery_emails VALUES (?,?,?,?)').run('a',await emailLookup('expire@example.com',key),await encryptEmail('expire@example.com','a',encKey),'2026-01-01');
- const recovery=makeRecovery({options:async()=>({challenge:'c'.repeat(43)}),verify:async()=>({verified:true,registrationInfo:{credential:{id:'id',publicKey:new Uint8Array([1]),counter:0}}})});
+ let time=1000,expireDuringVerify=false;
+ const recovery=makeRecovery({clock:()=>time,options:async()=>({challenge:'c'.repeat(43)}),verify:async()=>{if(expireDuringVerify)time=1302;return {verified:true,registrationInfo:{credential:{id:'id',publicKey:new Uint8Array([1]),counter:0}}}}});
  const issued=await recovery.issue(db,'expire@example.com',key,encKey,1000),browser=await recovery.confirm(db,issued.token,1001);
  await recovery.options(db,browser,'https://radio.example',1002);
+ time=1301;expireDuringVerify=true;
+ assert.equal(await recovery.finish(db,browser,'https://radio.example',{}),null);
+ assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM passkeys').get().n,0);
+ expireDuringVerify=false;
  assert.equal(await recovery.finish(db,browser,'https://radio.example',{},1302),null);
  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM passkeys').get().n,0);
  assert.ok(await recovery.options(db,browser,'https://radio.example',1303));

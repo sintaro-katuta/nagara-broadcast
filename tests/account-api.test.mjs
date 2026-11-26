@@ -6,7 +6,7 @@ import {accountApi} from '../cloudflare/account-api.mjs';
 const sqlite=await import('node:sqlite').catch(()=>null);
 test('admin setup code identifies only the current session and does not itself grant access',async()=>{
  let existing=false;const db={prepare(){return {async first(){return existing?{found:1}:null}}}},id='10000000-0000-4000-8000-000000000001';
- const user=async()=>({accountId:id,admin:false,sessionTag:'tag'}),request=(tag='tag',origin='https://radio.example')=>new Request('https://radio.example/api/account/admin-setup-code',{method:'POST',headers:{Origin:origin,'X-Account-Session':tag}});
+ const user=async()=>({accountId:id,admin:false,sessionTag:'tag',sessionHash:'hash'}),request=(tag='tag',origin='https://radio.example')=>new Request('https://radio.example/api/account/admin-setup-code',{method:'POST',headers:{Origin:origin,'X-Account-Session':tag}});
  assert.equal((await accountApi(request(),db,async()=>null,{adminBootstrapEnabled:true})).status,401);
  assert.equal((await accountApi(request(),db,user)).status,404);
  assert.equal((await accountApi(request('wrong'),db,user,{adminBootstrapEnabled:true})).status,409);
@@ -18,12 +18,13 @@ test('account API rejects unauthorized access and isolates accounts', {skip:!sql
  const sql=new sqlite.DatabaseSync(':memory:');sql.exec('PRAGMA foreign_keys=ON');
  sql.exec(readFileSync(new URL('../cloudflare/schema.sql',import.meta.url),'utf8'));
  sql.exec(readFileSync(new URL('../cloudflare/migrations/0001_account_data.sql',import.meta.url),'utf8'));
+ sql.exec(readFileSync(new URL('../cloudflare/migrations/0002_identity_sessions.sql',import.meta.url),'utf8'));
  sql.exec(readFileSync(new URL('../cloudflare/migrations/0013_position_write_cursors.sql',import.meta.url),'utf8'));
  sql.exec(readFileSync(new URL('../cloudflare/migrations/0018_history_generations.sql',import.meta.url),'utf8'));
- sql.exec("INSERT INTO accounts VALUES ('a'),('b'); INSERT INTO episodes VALUES ('ep','title','tech','','',10,3,'2026-01-01','audio/ep')");
+ sql.exec("INSERT INTO accounts VALUES ('a'),('b'); INSERT INTO account_sessions VALUES ('hash-a','a',9999999999),('hash-b','b',9999999999); INSERT INTO episodes VALUES ('ep','title','tech','','',10,3,'2026-01-01','audio/ep')");
  const db={prepare(query){return {bind(...args){return {async run(){const statement=sql.prepare(query);return /^\s*SELECT\b/i.test(query)?{results:statement.all(...args)}:{meta:{changes:Number(statement.run(...args).changes)}}},async all(){return {results:sql.prepare(query).all(...args)}},async first(){return sql.prepare(query).get(...args)||null}}},async all(){return {results:sql.prepare(query).all()}}}},async batch(items){sql.exec('BEGIN');try{const out=[];for(const item of items)out.push(await item.run());sql.exec('COMMIT');return out}catch(error){sql.exec('ROLLBACK');throw error}}};
  const request=(path,opts={})=>new Request('https://radio.example'+path,opts);
- const a=async()=>({accountId:'a',admin:false,sessionTag:'tag-a'}),b=async()=>({accountId:'b',admin:false,sessionTag:'tag-b'}),admin=async()=>({accountId:'a',admin:true,sessionTag:'tag-a'});
+ const a=async()=>({accountId:'a',admin:false,sessionTag:'tag-a',sessionHash:'hash-a'}),b=async()=>({accountId:'b',admin:false,sessionTag:'tag-b',sessionHash:'hash-b'}),admin=async()=>({accountId:'a',admin:true,sessionTag:'tag-a',sessionHash:'hash-a'});
  const put=(body,origin='https://radio.example',tag='tag-a')=>({method:'PUT',headers:{'Content-Type':'application/json',Origin:origin,'X-Account-Session':tag},body:JSON.stringify(body)});
  assert.equal((await accountApi(request('/api/account'),db,async()=>null)).status,401);
  assert.equal((await accountApi(request('/api/admin/storage'),db,a)).status,403);
@@ -51,17 +52,26 @@ test('account API rejects unauthorized access and isolates accounts', {skip:!sql
  assert.equal((await (await accountApi(request('/api/account'),db,b)).json()).history[0].position_seconds,20);
  assert.equal((await accountApi(request('/api/account/history',put(position(25,1))),db,a)).status,200);
  assert.equal((await (await accountApi(request('/api/account'),db,a)).json()).history[0].position_seconds,25);
+ // Simulate revocation after identity verification and before any write.
+ const revoked=async()=>{sql.exec("DELETE FROM account_sessions WHERE token_hash='hash-a'");return a();};
+ assert.equal((await accountApi(request('/api/account/favorite',put({episodeId:'ep',enabled:false})),db,revoked)).status,409);
+ assert.equal(sql.prepare("SELECT COUNT(*) n FROM favorites WHERE account_id='a'").get().n,1);
+ assert.equal((await accountApi(request('/api/account/history',{method:'DELETE',headers:{Origin:'https://radio.example','X-Account-Session':'tag-a'}}),db,revoked)).status,409);
+ assert.equal(sql.prepare("SELECT COUNT(*) n FROM listening_history WHERE account_id='a'").get().n,1);
+ assert.equal((await accountApi(request('/api/account/history',put(position(45,1))),db,revoked)).status,409);
+ assert.equal(sql.prepare("SELECT position_seconds FROM listening_history WHERE account_id='a'").get().position_seconds,25);
  sql.close();
 });
 
 test('only an authenticated admin can return a bounded batch of blocked notices to the queue', {skip:!sqlite&&'node:sqlite unavailable'}, async()=>{
  const sql=new sqlite.DatabaseSync(':memory:');
  sql.exec('CREATE TABLE recovery_notice_outbox (id TEXT PRIMARY KEY, blocked_at INTEGER, blocked_reason TEXT, attempts INTEGER, next_attempt_at INTEGER, lease_until INTEGER)');
+ sql.exec("CREATE TABLE account_sessions (token_hash TEXT, account_id TEXT, expires_at INTEGER); CREATE TABLE account_admins (account_id TEXT); INSERT INTO account_sessions VALUES ('hash','a',9999999999); INSERT INTO account_admins VALUES ('a')");
  for(let i=0;i<12;i++)sql.prepare('INSERT INTO recovery_notice_outbox VALUES (?, 1, ?, 3, 0, 0)').run(String(i).padStart(2,'0'),'http_403');
  sql.exec("INSERT INTO recovery_notice_outbox VALUES ('waiting',NULL,NULL,2,123,0),('leased',1,'http_403',3,0,9999999999)");
  const db={prepare(query){return {bind(...args){return {async run(){return sql.prepare(query).run(...args)}}}}}};
  const req=(options={})=>new Request('https://radio.example/api/admin/notices/retry',options);
- const admin=async()=>({accountId:'a',admin:true,sessionTag:'tag'}),user=async()=>({accountId:'a',admin:false,sessionTag:'tag'});
+ const admin=async()=>({accountId:'a',admin:true,sessionTag:'tag',sessionHash:'hash'}),user=async()=>({accountId:'a',admin:false,sessionTag:'tag',sessionHash:'hash'});
  const post=(origin='https://radio.example',tag='tag')=>({method:'POST',headers:{Origin:origin,'X-Account-Session':tag}});
  assert.equal((await accountApi(req(post()),db,async()=>null)).status,401);
  assert.equal((await accountApi(req(post()),db,user)).status,403);
@@ -75,5 +85,8 @@ test('only an authenticated admin can return a bounded batch of blocked notices 
  assert.equal(sql.prepare("SELECT attempts FROM recovery_notice_outbox WHERE id='00'").get().attempts,0);
  assert.deepEqual(await (await accountApi(req(post()),db,admin)).json(),{queued:2});
  assert.deepEqual(await (await accountApi(req(post()),db,admin)).json(),{queued:0});
+ sql.exec("UPDATE recovery_notice_outbox SET blocked_at=1 WHERE id='00'; DELETE FROM account_admins WHERE account_id='a'");
+ assert.deepEqual(await (await accountApi(req(post()),db,admin)).json(),{queued:0});
+ assert.equal(sql.prepare("SELECT blocked_at FROM recovery_notice_outbox WHERE id='00'").get().blocked_at,1);
  sql.close();
 });

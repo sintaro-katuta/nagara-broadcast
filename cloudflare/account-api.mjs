@@ -17,6 +17,7 @@ export async function accountApi(request,db,verifyIdentity,{getUsage=async()=>nu
  if(!['/api/account','/api/account/favorite','/api/account/history','/api/account/admin-setup-code','/api/admin/storage','/api/admin/usage','/api/admin/notices/retry'].includes(url.pathname))return null;
  const identity=await verifyIdentity(request);
  if(!identity?.accountId)return json({error:'ログインが必要です。'},401);
+ if(!identity.sessionHash)return json({error:'ログインが必要です。'},401);
  if(request.method!=='GET'&&request.headers.get('Origin')!==url.origin)return json({error:'リクエストを確認できません。'},403);
  if(request.method!=='GET'&&(!identity.sessionTag||request.headers.get('X-Account-Session')!==identity.sessionTag))return json({error:'アカウントが変更されました。'},409);
  if(url.pathname==='/api/account/admin-setup-code'){
@@ -30,7 +31,7 @@ export async function accountApi(request,db,verifyIdentity,{getUsage=async()=>nu
   if(url.pathname==='/api/admin/notices/retry'){
    if(request.method!=='POST')return json({error:'許可されていない操作です。'},405);
    const now=Math.floor(Date.now()/1000);
-   const result=await db.prepare('UPDATE recovery_notice_outbox SET blocked_at=NULL,blocked_reason=NULL,attempts=0,next_attempt_at=? WHERE id IN (SELECT id FROM recovery_notice_outbox WHERE blocked_at IS NOT NULL AND lease_until<=? ORDER BY blocked_at,id LIMIT 10)').bind(now,now).run();
+   const result=await db.prepare('UPDATE recovery_notice_outbox SET blocked_at=NULL,blocked_reason=NULL,attempts=0,next_attempt_at=? WHERE EXISTS (SELECT 1 FROM account_sessions s JOIN account_admins a ON a.account_id=s.account_id WHERE s.token_hash=? AND s.account_id=? AND s.expires_at>unixepoch()) AND id IN (SELECT id FROM recovery_notice_outbox WHERE blocked_at IS NOT NULL AND lease_until<=? ORDER BY blocked_at,id LIMIT 10)').bind(now,identity.sessionHash,identity.accountId,now).run();
    return json({queued:result.meta?.changes??result.changes??0});
   }
   if(request.method!=='GET')return json({error:'許可されていない操作です。'},405);
@@ -42,7 +43,7 @@ export async function accountApi(request,db,verifyIdentity,{getUsage=async()=>nu
  }
  if(url.pathname==='/api/account'&&request.method==='GET')return json({...await getAccountData(db,identity.accountId),sessionTag:identity.sessionTag,admin:identity.admin===true});
  if(url.pathname==='/api/account/history'&&request.method==='DELETE'){
-  await clearListeningHistory(db,identity.accountId);return json({ok:true});
+  const result=await clearListeningHistory(db,identity.accountId,identity.sessionHash);if(!(result[0]?.meta?.changes??result[0]?.changes))return json({error:'アカウントが変更されました。'},409);return json({ok:true});
  }
  if(request.method!=='PUT'||!['/api/account/favorite','/api/account/history'].includes(url.pathname))return json({error:'許可されていない操作です。'},405);
  if(!/^application\/json(?:\s*;|$)/i.test(request.headers.get('Content-Type')||''))return json({error:'JSONが必要です。'},415);
@@ -53,12 +54,12 @@ export async function accountApi(request,db,verifyIdentity,{getUsage=async()=>nu
  if(!episode)return json({error:'エピソードが見つかりません。'},404);
  if(url.pathname==='/api/account/favorite'){
   if(typeof body.enabled!=='boolean')return json({error:'指定が不正です。'},400);
-  await setFavorite(db,identity.accountId,body.episodeId,body.enabled);
+  if(!await setFavorite(db,identity.accountId,body.episodeId,body.enabled,undefined,identity.sessionHash))return json({error:'アカウントが変更されました。'},409);
  }else{
   if(typeof body.positionSeconds!=='number'||!Number.isFinite(body.positionSeconds)||body.positionSeconds<0||body.positionSeconds>604800)return json({error:'再生位置が不正です。'},400);
   if(typeof body.writerId!=='string'||!/^[-a-zA-Z0-9_]{16,80}$/.test(body.writerId)||!Number.isSafeInteger(body.sequence)||body.sequence<1)return json({error:'再生位置の更新が不正です。'},400);
   if(!Number.isSafeInteger(body.historyGeneration)||body.historyGeneration<0)return json({error:'再生履歴の状態が不正です。'},400);
-  if(!await setListeningPosition(db,identity.accountId,body.episodeId,body.positionSeconds,body.writerId,body.sequence,body.historyGeneration))return json({error:'再生履歴が変更されました。'},409);
+  if(!await setListeningPosition(db,identity.accountId,body.episodeId,body.positionSeconds,body.writerId,body.sequence,body.historyGeneration,undefined,identity.sessionHash))return json({error:'再生履歴が変更されました。'},409);
  }
  return json({ok:true});
 }
