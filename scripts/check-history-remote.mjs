@@ -3,6 +3,7 @@ import {readFile,readdir} from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import worker from '../cloudflare/worker.mjs';
 import {cleanupOldPositionCursors} from '../cloudflare/auth-cleanup.mjs';
+import {adminBootstrapCode,bootstrapFirstAdmin} from '../cloudflare/admin-bootstrap.mjs';
 const account=process.env.CLOUDFLARE_ACCOUNT_ID,token=process.env.CLOUDFLARE_D1_WRITE_TOKEN;
 if(!/^[a-f0-9]{32}$/i.test(account||'')||!token)throw new Error('D1 test configuration missing');
 const api=`https://api.cloudflare.com/client/v4/accounts/${account}/d1/database`,name=`nagara-history-test-${randomUUID()}`;let id;
@@ -44,5 +45,15 @@ try{
  assert.equal((await apiRequest('/api/account/history','PUT',0,body(10,priorGeneration,21),a.sessionTag)).status,409);
  assert.equal((await read(1)).history[0].position_seconds,20);
  await sql("DELETE FROM accounts WHERE id='synthetic-a'");assert.equal((await sql("SELECT COUNT(*) AS n FROM account_history_generations WHERE account_id='synthetic-a'")).results[0].n,0);
+ await sql("DELETE FROM accounts WHERE id='synthetic-b'");
+ const adminId=randomUUID(),code=await adminBootstrapCode(adminId);await sql('INSERT INTO accounts(id) VALUES (?)',[adminId]);
+ await sql('INSERT INTO recovery_emails VALUES (?,?,?,?)',[adminId,'synthetic-lookup','synthetic-cipher','2026-01-01']);
+ await sql('INSERT INTO account_sessions VALUES (?,?,?)',[hash(randomBytes(32).toString('hex')),adminId,expires]);
+ await sql('INSERT INTO passkeys VALUES (?,?,?,?,?,?)',['test-key-one',adminId,[1,2],0,'[]','2026-01-01']);
+ assert.equal(await bootstrapFirstAdmin(db,code),false);
+ await sql('INSERT INTO passkeys VALUES (?,?,?,?,?,?)',['test-key-two',adminId,[3,4],0,'[]','2026-01-01']);
+ const bootstrap=await Promise.all([bootstrapFirstAdmin(db,code),bootstrapFirstAdmin(db,code)]);assert.deepEqual(bootstrap.sort(),[false,true]);
+ assert.equal((await sql('SELECT COUNT(*) AS n FROM account_admins')).results[0].n,1);
+ console.log('Temporary real D1: first-admin prerequisites and concurrent bootstrap verified.');
  console.log('Temporary real D1: migration preserved data, old writes rejected, concurrent clears safe, other account preserved and deletion cascaded.');
 }finally{if(id){await request(`/${id}`,'DELETE');console.log('Temporary test database deleted');}}
