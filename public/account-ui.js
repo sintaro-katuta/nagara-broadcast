@@ -22,7 +22,7 @@ function webauthn(){
 
 export function makeAccountUI({onSession,onNotice}){
  let enabled=false,signedIn=false,isAdmin=false,sessionTag=null,refreshTag=null,historyGeneration=null,refreshGeneration=null,mode='enroll',link=initialLink,busy=false,stage='anonymous',stateVersion=0,initializing=null;
- let positionRevision=0;const pendingPositions=new Set();
+ let positionRevision=0,adminRequestId=0;const pendingPositions=new Set();
  const channel=typeof BroadcastChannel==='function'?new BroadcastChannel('nagara-account-session'):null;
  const dialog=$('account-dialog');
  const adminOpen=$('account-admin-open'),adminPanel=$('account-admin-panel');
@@ -63,15 +63,16 @@ export function makeAccountUI({onSession,onNotice}){
  $('account-close').onclick=()=>dialog.close();
  async function loadAdmin(){
   if(!isAdmin||!sessionTag||!adminPanel)return;
-  const version=stateVersion,tag=sessionTag;adminPanel.hidden=false;
+  const version=stateVersion,tag=sessionTag,requestId=++adminRequestId;adminPanel.hidden=false;
+  const current=()=>version===stateVersion&&tag===sessionTag&&requestId===adminRequestId;
   const retry=$('account-admin-retry'),help=$('account-admin-retry-help');if(retry)retry.hidden=true;if(help)help.hidden=true;
   $('account-admin-storage').textContent='音声の情報を読み込んでいます。';$('account-admin-mail').textContent='メールの使用状況を読み込んでいます。';$('account-admin-notices').textContent='セキュリティ通知の状態を読み込んでいます。';
   if($('account-admin-mail-pools'))$('account-admin-mail-pools').textContent='アプリ内のメール制限を読み込んでいます。';if($('account-admin-mail-warning'))$('account-admin-mail-warning').textContent='';
   try{
    const response=await fetch('/api/admin/usage',{headers:{'X-Account-Session':tag},credentials:'same-origin',cache:'no-store'});
-   if(version!==stateVersion||tag!==sessionTag)return;
+   if(!current())return;
    if(response.status===401||response.status===409){changedElsewhere();return;}
-   if(!response.ok)throw new Error();const result=await response.json();if(version!==stateVersion||tag!==sessionTag)return;
+   if(!response.ok)throw new Error();const result=await response.json();if(!current())return;
    $('account-admin-storage').textContent=`登録済み音声：${result.storage.count.toLocaleString()}本・${(result.storage.bytes/1e9).toFixed(2)} GB`;
    const show=part=>`${part.used.toLocaleString()} / ${part.limit===null?'上限なし':part.limit.toLocaleString()}通（更新 ${new Date(part.resetsAt).toLocaleString('ja-JP')}）`;
    $('account-admin-mail').textContent=result.resend?`メール使用数　今日：${show(result.resend.daily)}　今月：${show(result.resend.monthly)}`:'メールの使用状況を取得できません。接続設定を確認してください。';
@@ -81,7 +82,7 @@ export function makeAccountUI({onSession,onNotice}){
    if(poolElement)poolElement.textContent=pools?`アプリ内の送信制限（最大24時間）：登録 ${showPool(pools.enroll)}、復旧 ${showPool(pools.recovery)}、管理者復旧 ${showPool(pools['admin-recovery'])}。送信予約の数で、実際の配送数ではありません。`:'アプリ内のメール制限を取得できません。';
    if(warning){const near=part=>part&&part.limit!==null&&(part.limit===0||part.used>=part.limit*0.8);const alerts=[];if(result.resend&&(near(result.resend.daily)||near(result.resend.monthly)))alerts.push('Resendの送信枠が残り少なくなっています。');if(pools&&Object.values(pools).some(near))alerts.push('アプリ内のメール制限が上限に近づいています。');if(result.notices?.blocked)alerts.push('送れずに確認が必要な通知があります。');warning.textContent=alerts.join(' ');}
    if(retry)retry.hidden=!result.notices?.blocked;if(help)help.hidden=!result.notices?.blocked;
-  }catch{if(version===stateVersion){$('account-admin-storage').textContent='管理情報を取得できませんでした。';$('account-admin-mail').textContent='時間をおいて更新してください。';$('account-admin-notices').textContent='';if($('account-admin-mail-pools'))$('account-admin-mail-pools').textContent='';if($('account-admin-mail-warning'))$('account-admin-mail-warning').textContent='';}}
+  }catch{if(current()){$('account-admin-storage').textContent='管理情報を取得できませんでした。';$('account-admin-mail').textContent='時間をおいて更新してください。';$('account-admin-notices').textContent='';if($('account-admin-mail-pools'))$('account-admin-mail-pools').textContent='';if($('account-admin-mail-warning'))$('account-admin-mail-warning').textContent='';}}
  }
  if(adminOpen)adminOpen.onclick=loadAdmin;if($('account-admin-refresh'))$('account-admin-refresh').onclick=loadAdmin;
  const retry=$('account-admin-retry');if(retry)retry.onclick=async()=>{
