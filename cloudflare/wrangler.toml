@@ -6,12 +6,12 @@ keep_vars = true
 [vars]
 AUTH_ORIGIN = "https://nagara-broadcast.sintaro-katuta.com"
 AUTH_EMAIL_FROM = "no-reply@mail.nagara-broadcast.sintaro-katuta.com"
-AUTH_ENABLED = "false"
-PASSKEY_API_ENABLED = "false"
-PASSKEY_ADD_ENABLED = "false"
+AUTH_ENABLED = "true"
+PASSKEY_API_ENABLED = "true"
+PASSKEY_ADD_ENABLED = "true"
 ADMIN_BOOTSTRAP_ENABLED = "false"
 ADMIN_RECOVERY_ENABLED = "false"
-AUTH_NOTICES_ENABLED = "false"
+AUTH_NOTICES_ENABLED = "true"
 AUTH_CLEANUP_ENABLED = "true"
 POSITION_CURSOR_CLEANUP_ENABLED = "false"
 
