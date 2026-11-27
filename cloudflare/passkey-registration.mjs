@@ -74,7 +74,7 @@ export function makePasskeyRegistration({session=verifySession,options=registrat
   try{
    const results=await env.DB.batch([
     env.DB.prepare('INSERT INTO passkeys(credential_id,account_id,public_key,sign_count,transports,created_at) SELECT ?,?,?,?,?,? WHERE (SELECT COUNT(*) FROM passkeys WHERE account_id=?)<20 AND EXISTS (SELECT 1 FROM account_sessions WHERE token_hash=? AND account_id=? AND expires_at>?) AND EXISTS (SELECT 1 FROM recovery_emails WHERE account_id=?) RETURNING credential_id').bind(credential.id,identity.accountId,credential.publicKey,credential.counter,JSON.stringify(credential.transports||[]),new Date(now*1000).toISOString(),identity.accountId,identity.sessionHash,identity.accountId,now,identity.accountId),
-    env.DB.prepare('INSERT INTO recovery_notice_outbox(id,account_id,created_at,next_attempt_at) SELECT ?,?,?,? WHERE changes()=1 AND EXISTS (SELECT 1 FROM passkeys WHERE credential_id=? AND account_id=?)').bind('passkey-add:'+crypto.randomUUID(),identity.accountId,now,now,credential.id,identity.accountId)
+    env.DB.prepare('INSERT INTO recovery_notice_outbox(id,account_id,created_at,next_attempt_at) SELECT ?,?,?,? WHERE changes()=1 AND EXISTS (SELECT 1 FROM passkeys WHERE credential_id=? AND account_id=?)').bind('passkey-add:v2:'+crypto.randomUUID(),identity.accountId,now,now,credential.id,identity.accountId)
    ]);
    if(!results[0]?.results?.length)return json({error:'セッションまたは登録数を確認してください。'},409,clear);
   }catch{return json({error:'登録できませんでした。'},400,clear);}

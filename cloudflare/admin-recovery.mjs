@@ -58,7 +58,7 @@ export function makeAdminRecovery({options=registrationOptions,verify=verifyRegi
      db.prepare('DELETE FROM passkey_registration_attempts WHERE account_id=?').bind(row.account_id),
      db.prepare('DELETE FROM passkey_recovery_attempts WHERE account_id=?').bind(row.account_id),
      db.prepare('INSERT INTO account_sessions(token_hash,account_id,expires_at) VALUES (?,?,?)').bind(session.tokenHash,row.account_id,session.expiresAt),
-     db.prepare('INSERT INTO recovery_notice_outbox(id,account_id,created_at,next_attempt_at) VALUES (?,?,?,?)').bind('admin-recover:'+crypto.randomUUID(),row.account_id,commitTime,commitTime)
+     db.prepare('INSERT INTO recovery_notice_outbox(id,account_id,created_at,next_attempt_at) VALUES (?,?,?,?)').bind('admin-recover:v2:'+crypto.randomUUID(),row.account_id,commitTime,commitTime)
     ]);
     return changes[0]?.results?.length?session.cookie:null;
    }catch{return null;}

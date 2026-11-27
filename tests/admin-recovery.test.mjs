@@ -42,5 +42,5 @@ test('admin recovery needs verified email and browser-specific operator approval
  assert.match(await recovery.finish(db,another.browserToken,'https://radio.example',{valid:true}),/__Host-nagara_session=/);
  assert.deepEqual(sql.prepare('SELECT credential_id FROM passkeys').all().map(x=>x.credential_id),['bmV3']);assert.equal(sql.prepare('SELECT COUNT(*) n FROM account_admins').get().n,1);
  assert.equal(sql.prepare("SELECT COUNT(*) n FROM account_sessions WHERE token_hash='old-session'").get().n,0);assert.equal(sql.prepare('SELECT COUNT(*) n FROM favorites').get().n,1);
- assert.match(sql.prepare('SELECT id FROM recovery_notice_outbox').get().id,/^admin-recover:/);assert.equal(await recovery.status(db,another.browserToken),null);assert.equal(await recovery.finish(db,another.browserToken,'https://radio.example',{valid:true}),null);sql.close();
+ assert.match(sql.prepare('SELECT id FROM recovery_notice_outbox').get().id,/^admin-recover:v2:/);assert.equal(await recovery.status(db,another.browserToken),null);assert.equal(await recovery.finish(db,another.browserToken,'https://radio.example',{valid:true}),null);sql.close();
 });

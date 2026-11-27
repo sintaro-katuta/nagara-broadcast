@@ -28,6 +28,7 @@ test('email recovery requires verification and refuses administrators',{skip:!sq
  const session=await recovery.finish(db,browser,'https://radio.example',{valid:true},1003);
  assert.match(session,/__Host-nagara_session=/);
  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM recovery_notice_outbox WHERE account_id=?').get('a').n,1);
+ assert.match(sql.prepare('SELECT id FROM recovery_notice_outbox WHERE account_id=?').get('a').id,/^recovery:v2:/);
  assert.equal(sql.prepare("SELECT generation FROM account_auth_generations WHERE account_id='a'").get().generation,1);
  assert.equal(await recovery.finish(db,browser,'https://radio.example',{valid:true},1004),null);
  assert.equal(sql.prepare("SELECT COUNT(*) AS n FROM account_sessions WHERE token_hash='old'").get().n,0);
