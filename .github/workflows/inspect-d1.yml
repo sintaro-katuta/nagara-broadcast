@@ -5,7 +5,7 @@ permissions:
   contents: read
 jobs:
   inspect:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/verify/restore-mobile-stage'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -13,8 +13,22 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
-      - name: Inspect schema and migration history
+      - run: npm ci
+      - run: npm run build
+      - run: node scripts/build-cloudflare.mjs
+      - name: Validate staging isolation and prepare configuration
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_D1_READ_TOKEN: ${{ secrets.CLOUDFLARE_D1_READ_TOKEN }}
-        run: node scripts/inspect-d1.mjs
+          CLOUDFLARE_D1_WRITE_TOKEN: ${{ secrets.CLOUDFLARE_D1_WRITE_TOKEN }}
+        run: node scripts/restore-mobile-stage.mjs
+      - name: Deploy isolated staging
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npx --yes wrangler@4.168.0 deploy --config /tmp/nagara-mobile-stage.json
+      - name: Verify isolated staging gate and authentication configuration
+        env:
+          NAGARA_STAGE_GATE: ${{ secrets.NAGARA_STAGE_GATE }}
+        run: node scripts/check-mobile-stage.mjs
