@@ -13,7 +13,9 @@ test('upload persists, byte streaming works, invalid uploads and cross origin re
  const params={title:'朝 <&> ラジオ',channel:'tech',duration:'40',description:'<script>hello</script>'};
  const mp3=Buffer.concat([Buffer.from('ID3'),Buffer.alloc(100,17)]);
  try{
-  assert.equal((await fetch(base+'/')).status,200);
+  const home=await fetch(base+'/');assert.equal(home.status,200);assert.match(await home.text(),/href="\/privacy\.html"/);
+  const privacy=await fetch(base+'/privacy.html');assert.equal(privacy.status,200);assert.match(privacy.headers.get('content-type'),/text\/html/);assert.match(await privacy.text(),/バックアップ/);
+  const privacyCss=await fetch(base+'/privacy.css');assert.equal(privacyCss.status,200);assert.match(privacyCss.headers.get('content-type'),/text\/css/);
   assert.equal((await fetch(base+'/player-model.js')).status,200);
   assert.equal((await fetch(base+'/account-ui.js')).status,200);
   assert.equal((await fetch(base+'/webauthn.js')).status,200);

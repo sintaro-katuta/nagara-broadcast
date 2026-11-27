@@ -1,0 +1,18 @@
+:root{color-scheme:light;--paper:#faf5ed;--ink:#38281f;--subtle:#705f55;--line:#e7d9cd;--accent:#c94f22}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN",Meiryo,sans-serif;line-height:1.9;overflow-wrap:anywhere}
+a{color:var(--accent);text-underline-offset:3px}
+a:focus-visible{outline:3px solid var(--accent);outline-offset:4px}
+.notice-header{max-width:960px;margin:auto;padding:32px 28px}
+.notice-header a{display:inline-flex;align-items:center;gap:14px;color:var(--ink);font-size:20px;font-weight:700;text-decoration:none}
+.notice-header img{width:36px;height:36px;object-fit:contain}
+.notice-main{max-width:740px;margin:42px auto 0;padding:0 28px 72px}
+.notice-eyebrow{color:var(--accent);font-size:11px;font-weight:700;letter-spacing:.12em}
+h1{font-size:clamp(30px,5vw,42px);line-height:1.35;margin:10px 0 20px}
+.notice-intro{color:var(--subtle);margin:0 0 52px}
+section{border-top:1px solid var(--line);padding:28px 0 20px}
+h2{font-size:20px;line-height:1.5;margin:0 0 16px}
+section p{margin:0 0 14px;font-size:15px}
+.notice-back{display:inline-flex;align-items:center;min-height:44px;margin-top:24px;font-weight:700}
+.notice-footer{max-width:960px;margin:auto;padding:24px 28px 44px;border-top:1px solid var(--line);font-weight:700}
+@media(max-width:600px){.notice-header{padding:24px 22px}.notice-main{margin-top:28px;padding:0 22px 60px}.notice-intro{margin-bottom:38px}.notice-footer{margin:0 22px;padding-inline:0}}
