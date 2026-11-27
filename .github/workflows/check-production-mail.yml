@@ -1,0 +1,28 @@
+name: Check production email delivery
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    concurrency:
+      group: production-mail-check
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - name: Verify current main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: test "$(gh api "repos/$REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$EXPECTED_SHA"
+      - name: Send fixed test message
+        env:
+          AUTH_RATE_KEY: ${{ secrets.AUTH_RATE_KEY }}
+        run: node scripts/check-production-mail.mjs
