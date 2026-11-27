@@ -29,7 +29,7 @@ test('adding a passkey requires its originating account and a one-use verified c
  assert.equal((await register(req('/api/auth/passkey/register/verify','a',{valid:true},cookie,{'X-Account-Session':'wrong'}),env)).status,409);
  const finish=await register(req('/api/auth/passkey/register/verify','a',{valid:true},cookie),env);
  assert.equal(finish.status,200);assert.equal(sql.prepare("SELECT account_id FROM passkeys WHERE credential_id='Y3JlZA'").get().account_id,'a');
- assert.match(sql.prepare('SELECT id FROM recovery_notice_outbox').get().id,/^passkey-add:/);
+ assert.match(sql.prepare('SELECT id FROM recovery_notice_outbox').get().id,/^passkey-add:v2:/);
  assert.equal((await register(req('/api/auth/passkey/register/verify','a',{valid:true},cookie),env)).status,401);
  const pendingCookie=await begin();
  const revokeDuringVerification=makePasskeyRegistration({rateLimit:allow,session:async()=>({accountId:'a',sessionHash:'session-a',sessionTag:'tag-a'}),verify:async()=>{sql.exec("DELETE FROM account_sessions WHERE token_hash='session-a'");return {verified:true,registrationInfo:{credential:{id:'bmV3',publicKey:new Uint8Array([1]),counter:0,transports:[]}}}}});

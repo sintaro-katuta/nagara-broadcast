@@ -19,7 +19,9 @@ export async function deliverRecoveryNotices(db,binding,from,encryptionKey,now=D
    const added=row.id.startsWith('passkey-add:'),admin=row.id.startsWith('admin-recover:');
    const subject=added?'ながら放送 パスキー追加のお知らせ':admin?'ながら放送 管理者アカウント復旧のお知らせ':'ながら放送 アカウント復旧のお知らせ';
    const text=added?`ながら放送のアカウントに、新しいパスキーが追加されました。\n\n追加日時（UTC）: ${new Date(row.created_at*1000).toISOString()}\n\n心当たりがない場合は、メールアカウントの安全を確認し、サービス管理者へご連絡ください。`:admin?`ながら放送の管理者アカウントで、メールと運用者の確認を経てパスキーが再登録されました。以前のパスキーとログイン状態は無効です。\n\n復旧日時（UTC）: ${new Date(row.created_at*1000).toISOString()}\n\n心当たりがない場合は、メールアカウントの安全を確認し、サービス管理者へご連絡ください。`:`ながら放送のアカウントで、メールによる復旧と新しいパスキーの登録が完了しました。以前のパスキーとログイン状態は無効です。\n\n復旧日時（UTC）: ${new Date(row.created_at*1000).toISOString()}\n\n心当たりがない場合は、メールアカウントの安全を確認し、サービス管理者へご連絡ください。`;
-   await binding.send({from:sender,to,subject,text:`${text}\n\nお問い合わせ：support@mail.nagara-broadcast.sintaro-katuta.com`},{idempotencyKey:`recovery-notice/${row.id}`});
+   // Existing queued messages retain their original body for provider retries.
+   const modern=['recovery:v2:','passkey-add:v2:','admin-recover:v2:'].some(prefix=>row.id.startsWith(prefix));
+   await binding.send({from:sender,to,subject,text:modern?`${text}\n\nお問い合わせ：support@mail.nagara-broadcast.sintaro-katuta.com`:text},{idempotencyKey:`recovery-notice/${row.id}`});
   }catch(error){
    if(error instanceof ResendDeliveryError&&!error.retryable){
     await db.prepare('UPDATE recovery_notice_outbox SET lease_token=NULL,lease_until=0,blocked_at=?,blocked_reason=? WHERE id=? AND lease_token=?').bind(seconds,`http_${error.status}`,row.id,lease).run();
