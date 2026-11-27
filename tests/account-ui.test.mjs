@@ -322,6 +322,25 @@ test('admin can queue blocked notifications and receives a clear result',async()
  assert.equal(elements['account-admin-retry'].hidden,true);assert.match(elements['account-admin-retry-result'].textContent,/2件を再送待ち/);
 });
 
+test('admin sees separate provider quota, application limits and actionable warnings',async()=>{
+ const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout','account-admin-open','account-admin-panel','account-admin-storage','account-admin-mail','account-admin-mail-pools','account-admin-mail-warning','account-admin-notices','account-admin-refresh'];
+ const elements=Object.fromEntries(names.map(name=>[name,{hidden:true,disabled:false,textContent:'',focus(){},reset(){}}]));elements['account-dialog'].querySelectorAll=()=>[];
+ globalThis.location={hash:'',pathname:'/',search:''};globalThis.history={state:null,replaceState(){}};globalThis.BroadcastChannel=undefined;globalThis.window={};globalThis.document={getElementById:id=>elements[id],addEventListener(){}};
+ let provider=null,used=32,blocked=1;
+ globalThis.fetch=async(path)=>{if(path==='/api/auth/status')return Response.json({available:true});if(path==='/api/account')return Response.json({favorites:[],history:[],historyGeneration:0,sessionTag:'a'.repeat(64),admin:true});if(path==='/api/admin/usage')return Response.json({storage:{count:0,bytes:0},resend:provider,notices:{waiting:0,blocked},mailPools:{enroll:{used,limit:40,resetsAt:null},recovery:{used:1,limit:25,resetsAt:null},'admin-recovery':{used:0,limit:5,resetsAt:null}}});throw new Error('unexpected path');};
+ const {makeAccountUI}=await import('../public/account-ui.js?test=mail-pools');const ui=makeAccountUI({onSession(){},onNotice(){}});await ui.init();await elements['account-admin-open'].onclick();
+ assert.match(elements['account-admin-mail'].textContent,/取得できません/);assert.match(elements['account-admin-mail-pools'].textContent,/登録 32 \/ 40/);assert.match(elements['account-admin-mail-pools'].textContent,/配送数ではありません/);assert.match(elements['account-admin-mail-warning'].textContent,/上限に近づいて/);assert.match(elements['account-admin-mail-warning'].textContent,/確認が必要/);
+ used=1;blocked=0;provider={daily:{used:80,limit:100,resetsAt:'2026-11-27T00:00:00Z'},monthly:{used:90,limit:3000,resetsAt:'2026-12-01T00:00:00Z'}};
+ await elements['account-admin-refresh'].onclick();assert.match(elements['account-admin-mail'].textContent,/80 \/ 100/);assert.match(elements['account-admin-mail-warning'].textContent,/Resendの送信枠/);assert.doesNotMatch(elements['account-admin-mail-warning'].textContent,/アプリ内/);
+ let finishOld;const oldResponse=new Promise(resolve=>{finishOld=resolve});let calls=0;
+ globalThis.fetch=async(path)=>{assert.equal(path,'/api/admin/usage');return ++calls===1?oldResponse:Response.json({storage:{count:0,bytes:0},resend:provider,notices:{waiting:0,blocked:0},mailPools:{enroll:{used:32,limit:40,resetsAt:null},recovery:{used:0,limit:25,resetsAt:null},'admin-recovery':{used:0,limit:5,resetsAt:null}}});};
+ const old=elements['account-admin-refresh'].onclick();await elements['account-admin-refresh'].onclick();finishOld(Response.json({storage:{count:0,bytes:0},resend:null,notices:{waiting:0,blocked:0},mailPools:{enroll:{used:1,limit:40,resetsAt:null},recovery:{used:0,limit:25,resetsAt:null},'admin-recovery':{used:0,limit:5,resetsAt:null}}}));await old;
+ assert.match(elements['account-admin-mail-pools'].textContent,/登録 32 \/ 40/);assert.match(elements['account-admin-mail-warning'].textContent,/上限に近づいて/);
+ calls=0;let rejectOld;const failedOld=new Promise((_,reject)=>{rejectOld=reject});const getCurrent=globalThis.fetch;globalThis.fetch=async(path,options)=>++calls===1?failedOld:getCurrent(path,options);
+ const staleFailure=elements['account-admin-refresh'].onclick();await elements['account-admin-refresh'].onclick();rejectOld(new Error('stale network failure'));await staleFailure;assert.match(elements['account-admin-mail-warning'].textContent,/上限に近づいて/);
+ ui.revalidate();assert.equal(elements['account-admin-mail-pools'].textContent,'');assert.equal(elements['account-admin-mail-warning'].textContent,'');
+});
+
 test('account deletion requires confirmation and passkey verification',async()=>{
  const names=['account-dialog','account-message','account-anonymous','account-confirm','account-create','account-signed-in','account-close','account-signin','account-register-toggle','account-recover-toggle','account-email-form','account-email-submit','account-email-description','account-email','account-confirm-button','account-create-button','account-logout','account-delete'];
  const elements=Object.fromEntries(names.map(name=>[name,{hidden:true,disabled:false,textContent:'',focus(){},reset(){}}]));const dialog=elements['account-dialog'];dialog.querySelectorAll=()=>[];dialog.close=()=>{};

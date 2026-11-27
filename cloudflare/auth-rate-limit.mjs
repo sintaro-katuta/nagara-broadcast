@@ -1,5 +1,6 @@
 const enc=new TextEncoder();
 const hex=bytes=>Array.from(bytes,x=>x.toString(16).padStart(2,'0')).join('');
+export const MAIL_POOLS=Object.freeze({enroll:40,recovery:25,'admin-recovery':5});
 
 // Identifiers such as IPs and addresses must not be written to D1 in plaintext.
 // Call separately for client, destination and account; fail closed on errors.
@@ -13,4 +14,18 @@ export async function consumeRateLimit(db,key,limit,windowSeconds,now=Date.now()
  const time=Math.floor(now/1000);
  const row=await db.prepare('INSERT INTO auth_rate_limits(bucket_key,attempts,expires_at) VALUES (?,1,?) ON CONFLICT(bucket_key) DO UPDATE SET attempts=CASE WHEN expires_at<=? THEN 1 ELSE attempts+1 END, expires_at=CASE WHEN expires_at<=? THEN excluded.expires_at ELSE expires_at END RETURNING attempts,expires_at').bind(key,time+windowSeconds,time,time).first();
  return {allowed:row.attempts<=limit,retryAfter:Math.max(0,row.expires_at-time)};
+}
+
+// These are reservations of app allowances, not provider usage or deliveries.
+export async function getMailPoolStatus(db,secret,now=Date.now()){
+ if(typeof secret!=='string'||!/^[a-f0-9]{64}$/i.test(secret))return null;
+ try{
+  const bytes=Uint8Array.from(secret.match(/../g),x=>parseInt(x,16)),time=Math.floor(now/1000);
+  const entries=await Promise.all(Object.entries(MAIL_POOLS).map(async([type,limit])=>{
+   const key=await rateLimitKey(bytes,'account',`mail-pool:${type}`);
+   const row=await db.prepare('SELECT attempts,expires_at FROM auth_rate_limits WHERE bucket_key=? AND expires_at>?').bind(key,time).first();
+   return [type,{used:row?Math.min(row.attempts,limit):0,limit,resetsAt:row?new Date(row.expires_at*1000).toISOString():null}];
+  }));
+  return Object.fromEntries(entries);
+ }catch{return null;}
 }
