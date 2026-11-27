@@ -9,6 +9,7 @@ import {deliverRecoveryNotices} from './recovery-notices.mjs';
 import {makeResendEmail,getResendUsage} from './resend-email.mjs';
 import {makeAccountDeletion} from './account-deletion.mjs';
 import {getMailPoolStatus} from './auth-rate-limit.mjs';
+import {productionMailCheck} from './production-mail-check.mjs';
 
 const json=(value,status=200)=>Response.json(value,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 const publicEpisode=row=>({id:row.id,title:episodeTitle(row),channel:row.channel,description:row.description,source:row.source,duration:row.duration,size:row.size,date:row.date,audio:`/audio/${row.id}.mp3`,demo:false});
@@ -44,6 +45,7 @@ export default {
  async fetch(request,env,ctx){
   const url=new URL(request.url);
   try{
+   if(url.pathname==='/api/internal/production-mail-check')return await productionMailCheck(request,env);
    if(request.method==='GET'&&url.pathname==='/api/auth/status'){
     const configured=env.AUTH_ENABLED==='true'&&env.PASSKEY_API_ENABLED==='true'&&env.AUTH_NOTICES_ENABLED==='true'&&env.AUTH_ORIGIN===url.origin&&!!makeResendEmail(env.RESEND_API_KEY)&&typeof env.AUTH_EMAIL_FROM==='string'&&['AUTH_RATE_KEY','AUTH_LOOKUP_KEY','AUTH_ENCRYPTION_KEY'].every(k=>typeof env[k]==='string'&&/^[a-f0-9]{64}$/i.test(env[k]))&&new Set(['AUTH_RATE_KEY','AUTH_LOOKUP_KEY','AUTH_ENCRYPTION_KEY'].map(k=>env[k].toLowerCase())).size===3;
     return json({available:configured,passkeyAddAvailable:configured&&env.PASSKEY_ADD_ENABLED==='true',adminSetupAvailable:configured&&env.ADMIN_BOOTSTRAP_ENABLED==='true',adminRecoveryAvailable:configured&&env.ADMIN_RECOVERY_ENABLED==='true'});
