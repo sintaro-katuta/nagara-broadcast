@@ -24,19 +24,19 @@ test('failed notices remain for retry and a successful send removes the record',
  const row=sql.prepare('SELECT * FROM recovery_notice_outbox').get();assert.equal(row.attempts,1);assert.equal(row.next_attempt_at,1060);assert.equal(row.lease_until,0);
  assert.deepEqual(await deliverRecoveryNotices(db,binding,'sender@example.com',key,1059000),{sent:0,failed:0});
  assert.deepEqual(await deliverRecoveryNotices(db,binding,'sender@example.com',key,1060000),{sent:1,failed:0});
- assert.equal(message.to,'person@example.com');assert.match(message.text,/復旧/);assert.doesNotMatch(message.text,/notice|lookup|#recover/);
+ assert.equal(message.to,'person@example.com');assert.match(message.text,/復旧/);assert.match(message.text,/support@mail\.nagara-broadcast\.sintaro-katuta\.com/);assert.doesNotMatch(message.text,/notice|lookup|#recover/);
  assert.equal(sql.prepare('SELECT COUNT(*) n FROM recovery_notice_outbox').get().n,0);sql.close();
 });
 
 test('added passkeys send an accurate notification using the retry queue',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{
  const {sql,key,db}=await setup();sql.exec("UPDATE recovery_notice_outbox SET id='passkey-add:test'");let message;
  assert.deepEqual(await deliverRecoveryNotices(db,{async send(value){message=value}},'sender@example.com',key,1000000),{sent:1,failed:0});
- assert.match(message.subject,/パスキー追加/);assert.match(message.text,/新しいパスキーが追加/);assert.doesNotMatch(message.text,/メールによる復旧/);assert.equal(sql.prepare('SELECT COUNT(*) n FROM recovery_notice_outbox').get().n,0);sql.close();
+ assert.match(message.subject,/パスキー追加/);assert.match(message.text,/新しいパスキーが追加/);assert.match(message.text,/support@mail\.nagara-broadcast\.sintaro-katuta\.com/);assert.doesNotMatch(message.text,/メールによる復旧/);assert.equal(sql.prepare('SELECT COUNT(*) n FROM recovery_notice_outbox').get().n,0);sql.close();
 });
 test('administrator recovery sends a distinct security notice',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{
  const {sql,key,db}=await setup();sql.exec("UPDATE recovery_notice_outbox SET id='admin-recover:test'");let message;
  assert.deepEqual(await deliverRecoveryNotices(db,{async send(value){message=value}},'sender@example.com',key,1000000),{sent:1,failed:0});
- assert.match(message.subject,/管理者/);assert.match(message.text,/以前のパスキーとログイン状態は無効/);sql.close();
+ assert.match(message.subject,/管理者/);assert.match(message.text,/以前のパスキーとログイン状態は無効/);assert.match(message.text,/support@mail\.nagara-broadcast\.sintaro-katuta\.com/);sql.close();
 });
 
 test('concurrent workers cannot claim the same notification before its lease expires',{skip:!sqlite&&'node:sqlite unavailable'},async()=>{
